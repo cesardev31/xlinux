@@ -2,7 +2,6 @@
 
 import json
 import os
-import shlex
 import signal
 import socket
 import subprocess
@@ -13,9 +12,6 @@ import time
 
 from . import config
 from .util import log, output, run
-
-# Opciones del engine que decidimos nosotros (el VM Service se reenvía por USB).
-_RESERVED_ENGINE_OPTIONS = ("--vm-service-port", "--vm-service-host", "--observatory-port")
 
 
 def pmd3(*args, **kw):
@@ -65,44 +61,62 @@ def installed_app(bundle_id):
     sys.exit(f"error: la app {bundle_id} no está instalada en el iPhone")
 
 
-def _free_port():
+def launch(bundle_id):
+    """Abre la app sin debugger (release/profile, o frameworks sin JIT)."""
+    ensure_developer_image()
+    real_id, _ = installed_app(bundle_id)
+    log(f"Abriendo {real_id}")
+    run(["pymobiledevice3", "developer", "dvt", "launch", real_id], capture_output=True, text=True)
+
+
+def stream_logs(process_name="Runner", match=None):
+    cmd = ["pymobiledevice3", "syslog", "live", "-pn", process_name] + (["-m", match] if match else [])
+    subprocess.run(cmd, env=config.tool_env())
+
+
+def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
 class DebugSession:
-    """Lanza la app bajo lldb (necesario para el JIT de Dart en iOS) y deja el
-    Dart VM Service accesible en 127.0.0.1.
+    """Lanza la app bajo lldb y reenvía puertos del iPhone a 127.0.0.1.
 
-    iOS 17+: debugserver no puede lanzar apps, así que support/device_bridge.py
-    la lanza suspendida por DVT y support/lldb_driver.py se adjunta al pid.
+    iOS 17+: debugserver no puede lanzar apps, así que support/core/device_bridge.py
+    la lanza suspendida por DVT y support/core/lldb_driver.py se adjunta al pid.
+
+    local_app:    el .app compilado en Linux (para los símbolos)
+    bundle_id:    el del proyecto (el instalado puede tener prefijo XTL-<team>)
+    lldb_helpers: scripts de lldb a importar (p. ej. el helper JIT de Flutter)
+    forward_ports: puertos del iPhone a exponer en el mismo puerto local
     """
 
-    def __init__(self, project, udid):
-        self.project = project
+    def __init__(self, local_app, bundle_id, udid, lldb_helpers=(), forward_ports=()):
+        self.local_app = local_app
+        self.bundle_id = bundle_id
         self.udid = udid
-        self.vm_port = _free_port()
+        self.lldb_helpers = [str(h) for h in lldb_helpers]
+        self.forward_ports = list(forward_ports)
         self.bridge = None
         self.lldb = None
         self.stop_file = None
 
-    def start(self, engine_options):
+    def start(self, launch_args):
         ensure_developer_image()
-        bundle_id, remote_app = installed_app(self.project.bundle_identifier())
-        debug_port, control_port = _free_port(), _free_port()
+        real_id, remote_app = installed_app(self.bundle_id)
+        debug_port, control_port = free_port(), free_port()
 
-        self.bridge = subprocess.Popen(
-            [config.pymobiledevice3_python(), config.SUPPORT / "device_bridge.py", "--udid", self.udid,
-             "--debugserver-port", str(debug_port), "--vm-service-port", str(self.vm_port),
-             "--control-port", str(control_port)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=config.tool_env())
+        cmd = [config.pymobiledevice3_python(), config.SUPPORT / "core/device_bridge.py", "--udid", self.udid,
+               "--debugserver-port", str(debug_port), "--control-port", str(control_port)]
+        for port in self.forward_ports:
+            cmd += ["--forward", str(port)]
+        self.bridge = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, env=config.tool_env())
         self._wait_for(self.bridge, "BRIDGE_READY", 90, "el puente con el iPhone")
 
-        args = [o for o in engine_options if not o.startswith(_RESERVED_ENGINE_OPTIONS)]
-        args += [f"--vm-service-port={self.vm_port}", "--disable-service-auth-codes"]
         control = socket.create_connection(("127.0.0.1", control_port), timeout=90)
-        control.sendall((json.dumps({"cmd": "launch", "bundle_id": bundle_id, "args": args}) + "\n").encode())
+        control.sendall((json.dumps({"cmd": "launch", "bundle_id": real_id, "args": list(launch_args)}) + "\n").encode())
         response = json.loads(control.makefile().readline() or "{}")
         if "pid" not in response:
             control.close()
@@ -111,19 +125,18 @@ class DebugSession:
         self.stop_file = tempfile.mktemp(prefix="fil-stop-")
         env = config.tool_env()
         env["FIL_STOP_FILE"] = self.stop_file
-        env["FIL_ARGS"] = json.dumps([
-            str(config.SUPPORT / "flutter_lldb_helper.py"), str(self.project.app),
-            str(response["pid"]), f"127.0.0.1:{debug_port}", remote_app])
+        env["FIL_ARGS"] = json.dumps({
+            "helpers": self.lldb_helpers, "local_app": str(self.local_app), "pid": response["pid"],
+            "debugserver": f"127.0.0.1:{debug_port}", "remote_app": remote_app})
         self.lldb = subprocess.Popen(
-            ["lldb", "--batch", "-o", f"command script import {config.SUPPORT / 'lldb_driver.py'}"],
+            ["lldb", "--batch", "-o", f"command script import {config.SUPPORT / 'core/lldb_driver.py'}"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         try:
             self._wait_for(self.lldb, "[lldb] app corriendo", 120, "lldb")
         finally:
             # La sesión DVT mantiene la app suspendida: se libera cuando lldb ya
-            # está adjunto, si no Flutter arranca sin debugger.
+            # está adjunto (si no, la app arranca sin debugger).
             control.close()
-        return f"http://127.0.0.1:{self.vm_port}/"
 
     @staticmethod
     def _wait_for(process, marker, timeout, what):
@@ -159,43 +172,29 @@ class DebugSession:
         if self.stop_file and os.path.exists(self.stop_file):
             os.unlink(self.stop_file)
 
+    def run_until_parent_exits(self, launch_args, on_ready=None):
+        """start() + wait(), limpiando si nos matan o si el proceso padre (la
+        herramienta del framework, VS Code...) desaparece sin avisar."""
 
-def run_debug(project, engine_options, udid):
-    """Lanza en debug e imprime la línea que buscan `flutter run` / `flutter attach`."""
-    session = DebugSession(project, udid)
+        def terminate(*_):
+            self.stop()
+            sys.exit(0)
 
-    def terminate(*_):
-        session.stop()
-        sys.exit(0)
+        signal.signal(signal.SIGTERM, terminate)
+        signal.signal(signal.SIGINT, terminate)
+        parent = os.getppid()
 
-    signal.signal(signal.SIGTERM, terminate)
-    signal.signal(signal.SIGINT, terminate)
+        def watch_parent():
+            while os.getppid() == parent:
+                time.sleep(1)
+            self.stop()
+            os._exit(0)
 
-    # Si `flutter` (o VS Code) muere sin avisarnos, no dejar lldb ni el puente
-    # huérfanos: al quedar huérfanos nos adopta otro proceso y cambia el ppid.
-    parent = os.getppid()
-
-    def watch_parent():
-        while os.getppid() == parent:
-            time.sleep(1)
-        session.stop()
-        os._exit(0)
-
-    threading.Thread(target=watch_parent, daemon=True).start()
-    try:
-        url = session.start(shlex.split(engine_options) if isinstance(engine_options, str) else engine_options)
-        print(f"The Dart VM service is listening on {url}", flush=True)
-        session.wait()
-    finally:
-        session.stop()
-
-
-def launch_release(project):
-    """Abre la app (release/profile no necesitan debugger) y muestra sus logs."""
-    ensure_developer_image()
-    bundle_id, _ = installed_app(project.bundle_identifier())
-    log(f"Abriendo {bundle_id}")
-    run(["pymobiledevice3", "developer", "dvt", "launch", bundle_id], capture_output=True, text=True)
-    log("Logs de la app (Ctrl+C para salir)")
-    subprocess.run(["pymobiledevice3", "syslog", "live", "-pn", "Runner", "-m", "flutter"],
-                   env=config.tool_env())
+        threading.Thread(target=watch_parent, daemon=True).start()
+        try:
+            self.start(launch_args)
+            if on_ready:
+                on_ready()
+            self.wait()
+        finally:
+            self.stop()

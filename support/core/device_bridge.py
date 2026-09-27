@@ -1,8 +1,9 @@
-"""Puente local hacia el iPhone para depurar apps Flutter sin sudo.
+"""Puente local hacia el iPhone para depurar apps sin sudo.
 
-Abre tres puertos en 127.0.0.1:
+Abre en 127.0.0.1:
   --debugserver-port  -> debugserver del iPhone (iOS 17+, túnel userspace, sin check-in)
-  --vm-service-port   -> puerto del Dart VM Service dentro del iPhone (usbmux)
+  --forward PUERTO    -> (repetible) el mismo puerto dentro del iPhone, por usbmux
+                         (p. ej. el Dart VM Service de Flutter)
   --control-port      -> comandos JSON por línea. En iOS 17+ debugserver no puede
                          lanzar apps ("Operation not permitted"): se lanzan
                          suspendidas por DVT y lldb se adjunta al pid.
@@ -75,26 +76,20 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--udid")
     parser.add_argument("--debugserver-port", type=int, required=True)
-    parser.add_argument("--vm-service-port", type=int, required=True)
+    parser.add_argument("--forward", type=int, action="append", default=[])
     parser.add_argument("--control-port", type=int, required=True)
     args = parser.parse_args()
 
     async with UserspaceRsdTunnel(serial=args.udid) as rsd:
-        debug_ready, vm_ready = asyncio.Event(), asyncio.Event()
-        debugserver = RawRsdForwarder(
-            rsd, args.debugserver_port, rsd.get_service_port(DEBUGPROXY), debug_ready
-        )
-        vm_service = UsbmuxTcpForwarder(
-            args.udid, args.vm_service_port, args.vm_service_port, listening_event=vm_ready
-        )
-        tasks = [
-            asyncio.create_task(debugserver.start()),
-            asyncio.create_task(vm_service.start()),
-        ]
+        ready = [asyncio.Event() for _ in range(1 + len(args.forward))]
+        forwarders = [RawRsdForwarder(rsd, args.debugserver_port, rsd.get_service_port(DEBUGPROXY), ready[0])]
+        forwarders += [UsbmuxTcpForwarder(args.udid, port, port, listening_event=event)
+                       for port, event in zip(args.forward, ready[1:])]
+        tasks = [asyncio.create_task(f.start()) for f in forwarders]
         control = await asyncio.start_server(control_handler(rsd), "127.0.0.1", args.control_port)
         tasks.append(asyncio.create_task(control.serve_forever()))
-        await debug_ready.wait()
-        await vm_ready.wait()
+        for event in ready:
+            await event.wait()
         print("BRIDGE_READY", flush=True)
         await asyncio.gather(*tasks)
 

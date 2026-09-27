@@ -1,10 +1,10 @@
-"""Rutas y entorno de flutter-ios-linux.
+"""Rutas y entorno.
 
 El código vive en este repo; todo lo pesado (toolchain Swift, SDK de iOS,
-engine de Flutter, Darling, pymobiledevice3) vive en el directorio de datos,
-normalmente un SSD externo. Los comandos se pueden invocar desde VS Code o
-desde la herramienta `flutter` (custom devices), que no cargan ningún
-`env.sh`, así que el entorno se arma aquí.
+Darling, pymobiledevice3, artefactos de cada framework) vive en el directorio
+de datos, normalmente un SSD externo. Los comandos se pueden invocar desde
+VS Code o desde la herramienta de un framework (p. ej. los custom devices de
+Flutter), que no cargan ningún `env.sh`, así que el entorno se arma aquí.
 """
 
 import json
@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 SUPPORT = REPO / "support"
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "flutter-ios-linux/config.json"
 DEFAULT_DATA_DIR = "/run/media/cesar/games/ios-dev"
@@ -55,10 +55,6 @@ def swift_bin():
 
 def pymobiledevice3_python():
     return data_dir() / "uv-tools/pymobiledevice3/bin/python"
-
-
-def engine_dir(revision):
-    return data_dir() / "flutter-engine" / revision
 
 
 def compat_shim():

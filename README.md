@@ -10,6 +10,27 @@ flutter-ios-linux build [--debug] [--install]
 flutter-ios-linux doctor
 ```
 
+## Arquitectura
+
+```
+fil/core/               agnóstico al framework
+  toolchain.py          swiftc/clang/SwiftPM para iOS con el SDK de xtool
+  app.py                .app/.ipa sin ibtool/actool (Info.plist, íconos, recursos)
+  darling.py            correr herramientas CLI de macOS (con support/core/darling_compat.c)
+  device.py             detectar, instalar, lanzar; DebugSession (DVT + debugserver + lldb)
+  setup.py              setup/doctor comunes
+fil/adapters/flutter/   todo lo específico de Flutter
+  build.py              kernel, gen_snapshot, flutter_assets, Runner
+  plugins.py            plugins nativos vía SwiftPM (como `flutter build ios` en macOS)
+  debug.py              helper JIT + VM Service para `flutter run`/`attach`
+  custom_device.py      el iPhone en `flutter devices` y VS Code
+support/core/           device_bridge.py, lldb_driver.py, darling_compat.c
+support/flutter/        FlutterLinuxSceneDelegate.swift, flutter_lldb_helper.py
+```
+
+Un adaptador nuevo (p. ej. Expo/React Native) aporta su build y su forma de
+depurar; firma, instalación, dispositivo, SwiftPM y empaquetado vienen del core.
+
 ## Cómo funciona
 
 | Paso en macOS (Xcode) | Aquí |
@@ -50,7 +71,7 @@ flutter-ios-linux doctor
 
 ## Limitaciones conocidas
 
-- Plugins nativos (CocoaPods / SwiftPM): todavía no se compilan.
+- Plugins nativos: SwiftPM en progreso (primer caso real: Volaré); solo-CocoaPods no soportados.
 - Hot reload tarda más que en Mac (cada página JIT nueva hace una parada en lldb).
 - Flutter solo acepta custom devices "linux": un hot restart envía el registrante de
   plugins Dart de Linux.

@@ -14,8 +14,8 @@ import json
 import os
 from pathlib import Path
 
-from . import config
-from .util import log, run
+from ...core import config
+from ...core.util import log, run
 
 DEVICE_ID = "iphone-linux"
 FLUTTER_CUSTOM_DEVICES = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "flutter/custom_devices.json"

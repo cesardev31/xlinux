@@ -5,9 +5,10 @@ engine llama a NOTIFY_DEBUGGER_ABOUT_RX_PAGES y el helper de Flutter
 (flutter_lldb_helper.py) toca esas páginas desde lldb. Este script corre
 dentro del Python de lldb:
 
-  FIL_ARGS='[...]' lldb --batch -o "command script import lldb_driver.py"
+  FIL_ARGS='{...}' lldb --batch -o "command script import lldb_driver.py"
 
-FIL_ARGS (JSON) = [helper, app_local, pid, "host:puerto", ruta_app_en_iphone]
+FIL_ARGS (JSON) = {"helpers": [...], "local_app": ..., "pid": ..., "debugserver": "host:puerto",
+                   "remote_app": ruta del .app en el iPhone}
 
 En iOS 17+ debugserver no puede lanzar apps: device_bridge.py la lanza
 suspendida (con los argumentos de Flutter) y aquí lldb se adjunta al pid.
@@ -41,7 +42,7 @@ def _report_crash(process):
                 print(f"[lldb]   {frame}")
 
 
-def run(debugger, helper, local_app, pid, debugserver, remote_app):
+def run(debugger, helpers, local_app, pid, debugserver, remote_app):
     interp = debugger.GetCommandInterpreter()
     result = lldb.SBCommandReturnObject()
 
@@ -52,7 +53,8 @@ def run(debugger, helper, local_app, pid, debugserver, remote_app):
             raise SystemExit(f"[lldb] falló `{line}`: {result.GetError()}")
 
     debugger.SetAsync(False)
-    cmd(f'command script import "{helper}"')
+    for helper in helpers:
+        cmd(f'command script import "{helper}"')
     # Sin la caché compartida de iOS en disco (Xcode la extrae en DeviceSupport),
     # lldb leería los símbolos de ~500 librerías del sistema desde la memoria del
     # iPhone y la app se quedaría congelada minutos. Solo necesitamos los de
@@ -122,13 +124,12 @@ def run(debugger, helper, local_app, pid, debugserver, remote_app):
 
 
 def __lldb_init_module(debugger, _dict):
-    args = json.loads(os.environ.get("FIL_ARGS", "[]"))
+    args = json.loads(os.environ.get("FIL_ARGS", "{}"))
     if not args:
         print("[lldb] falta FIL_ARGS")
         return
-    helper, local_app, pid, debugserver, remote_app = args
     try:
-        run(debugger, helper, local_app, pid, debugserver, remote_app)
+        run(debugger, args["helpers"], args["local_app"], args["pid"], args["debugserver"], args["remote_app"])
     except BaseException as e:  # SystemExit incluido: lldb lo tragaría en silencio
         import traceback
         traceback.print_exc()
