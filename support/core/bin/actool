@@ -41,6 +41,14 @@ VERSION_PLIST = {"com.apple.actool.version": {"bundle-version": "24000", "short-
 VECTOR_SCALES = (2, 3)
 
 
+def put(src, dst):
+    """Copia solo el contenido: las copias de SwiftPM son de solo lectura y
+    copiar permisos impediría sobrescribir la salida en la siguiente compilación."""
+    if dst.exists():
+        dst.unlink()
+    shutil.copyfile(src, dst)
+
+
 def warn(msg):
     print(f"warning: {msg}", flush=True)
 
@@ -89,6 +97,8 @@ def svg_size(path):
 
 
 def render_vector(src, dst, scale):
+    if dst.exists():
+        dst.unlink()
     if src.suffix.lower() == ".pdf":
         prefix = str(dst.with_suffix(""))
         subprocess.run(["pdftocairo", "-png", "-singlefile", "-transp", "-r", str(72 * scale), str(src), prefix],
@@ -131,7 +141,7 @@ def compile_imageset(imageset, name, out, outputs):
         elif ext in (".png", ".jpg", ".jpeg"):
             s = scale or "1x"
             dst = out / f"{name}{'' if s == '1x' else '@' + s}{suffix}{'.png' if ext == '.png' else ext}"
-            shutil.copy(src, dst)
+            put(src, dst)
             outputs.append(dst)
 
 
@@ -145,7 +155,7 @@ def compile_app_icon(iconset, out, outputs):
         base = f"AppIcon{size}"
         scale = image.get("scale", "1x")
         dst = out / f"{base}{'' if scale == '1x' else '@' + scale}{'~ipad' if image['idiom'] == 'ipad' else ''}.png"
-        shutil.copy(iconset / filename, dst)
+        put(iconset / filename, dst)
         outputs.append(dst)
         names.add(base)
     if not names:

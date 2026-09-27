@@ -112,7 +112,12 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
     run(["swift", "build", "--build-system", "swiftbuild", "--triple", "arm64-apple-ios",
          "--toolset", config.XTOOL_SDK / "toolset-swb.json", "-c", configuration,
          "--package-path", package, "--scratch-path", scratch, "--config-path", config_path,
-         "--cache-path", config.data_dir() / "swiftpm-cache", *extra_flags],
+         "--cache-path", config.data_dir() / "swiftpm-cache",
+         # Módulos como _PassKit_SwiftUI (PayWithApplePayButton) solo existen
+         # como cross-import overlays; toolset.json de xtool lo activa, el de
+         # Swift Build no.
+         "-Xswiftc", "-Xfrontend", "-Xswiftc", "-enable-cross-import-overlays",
+         *extra_flags],
         cwd=package, env=env)
     products = scratch / "out/Products" / f"{configuration.capitalize()}-iphoneos"
     return products if products.is_dir() else scratch / "arm64-apple-ios" / configuration

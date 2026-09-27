@@ -23,7 +23,7 @@ Probado en un iPhone 11 con iOS 27.2 y una cuenta de Apple gratuita.
 | Hot reload (`flutter run` y protocolo de VS Code) | ✅ |
 | iPhone visible en `flutter devices` / VS Code | ✅ |
 | Native assets (hooks de Dart, p. ej. `objective_c`) en debug | ✅ |
-| Plugins nativos por SwiftPM | 🚧 Volaré (Firebase, Stripe, GoogleSignIn, WebView…): 1710/1770 pasos compilan |
+| Plugins nativos por SwiftPM | ✅ Volaré: firebase_core, google_sign_in, flutter_stripe, webview, url_launcher, shared_preferences |
 | Plugins solo con CocoaPods | ❌ |
 | Native assets en release | ❌ (`flutter assemble` release necesita el `gen_snapshot` de macOS) |
 
@@ -116,6 +116,12 @@ General → VPN y gestión de dispositivos).
 - `flutter build bundle --target-platform ios` no sirve con native assets (le falta
   `SdkRoot`): en debug se usa `flutter assemble`, que busca los artefactos iOS en la
   caché de Flutter (se enlazan al directorio de datos).
+- Macros: el `#Preview` de UIKit (`KitViewMacro`) no está en OpenAppleMacros de xtool;
+  se compila una versión con stubs (`<datos>/src/OpenAppleMacros`) y `setup` la instala.
+- Swift Build no activa los cross-import overlays (`_PassKit_SwiftUI` →
+  `PayWithApplePayButton`): se pasa `-enable-cross-import-overlays`.
+- Las copias de SwiftPM son de solo lectura: `actool` no debe copiar permisos.
+- Los frameworks de native assets quedan en `<salida de assemble>/native_assets/`.
 - El AppImage de xtool no monta FUSE cuando lo lanza el snap de Flutter → se usa extraído.
 
 ## Limitaciones conocidas
@@ -132,8 +138,7 @@ General → VPN y gestión de dispositivos).
 
 ## Próximos pasos
 
-1. Terminar Volaré (plugins de Firebase, Stripe, GoogleSignIn, WebView).
-2. Native assets en release y cachear el build nativo entre corridas.
-3. Plugins solo-CocoaPods (podspec → Package.swift).
-4. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
+1. Native assets en release y cachear el build nativo entre corridas.
+2. Plugins solo-CocoaPods (podspec → Package.swift).
+3. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
    (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).

@@ -38,6 +38,24 @@ def build_compat_shim():
          "-o", shim, config.SUPPORT / "core/darling_compat.c"], capture_output=True, text=True)
 
 
+def install_macro_server():
+    """OpenAppleMacros de xtool (el swift-plugin-server del SDK) no trae las
+    variantes de #Preview para UIKit (KitViewMacro...), que usa p. ej. Stripe.
+    Si hay una versión parchada en <datos>/bin, se instala sobre la de xtool
+    (ver <datos>/src/OpenAppleMacros)."""
+    patched = config.data_dir() / "bin/OpenAppleMacrosServer"
+    target = config.XTOOL_SDK / "OpenAppleMacrosServer"
+    if not patched.exists() or not target.exists():
+        return
+    if target.read_bytes() == patched.read_bytes():
+        return
+    backup = target.with_name("OpenAppleMacrosServer.orig")
+    if not backup.exists():
+        shutil.copy2(target, backup)
+    log("Instalando OpenAppleMacrosServer con stubs de #Preview para UIKit")
+    shutil.copy2(patched, target)
+
+
 def setup(adapters, data_dir=None):
     values = config.load_config()
     if data_dir:
@@ -48,6 +66,7 @@ def setup(adapters, data_dir=None):
         sys.exit("error: falta el SDK de Apple. Corre `xtool setup` con tu Xcode.xip primero.")
     extract_xtool()
     build_compat_shim()
+    install_macro_server()
     for adapter in adapters:
         adapter.setup()
     doctor(adapters)

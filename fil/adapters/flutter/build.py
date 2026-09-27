@@ -138,6 +138,9 @@ def assemble_debug(project, frameworks):
          "debug_ios_bundle_flutter_assets"],
         cwd=project.dir, capture_output=True, text=True)
     shutil.copytree(out / "App.framework", frameworks / "App.framework", symlinks=True, dirs_exist_ok=True)
+    # Native assets (hooks de Dart, p. ej. objective_c por FFI): Xcode los embebe.
+    for fw in (out / "native_assets").glob("*.framework"):
+        shutil.copytree(fw, frameworks / fw.name, symlinks=True, dirs_exist_ok=True)
 
 
 def build_assets(project, out):
@@ -192,10 +195,6 @@ def build(project_dir, debug=False):
         compile_kernel(flutter_root, project, dill)
         compile_aot(engine, dill, app_framework, project.build_dir)
         build_assets(project, app_framework / "flutter_assets")
-    # Native assets (hooks de Dart, p. ej. objective_c/path_provider por FFI):
-    # `flutter build bundle` los deja como frameworks; Xcode los embebe en el .app.
-    for fw in (project.dir / "build/native_assets/ios").glob("*.framework"):
-        shutil.copytree(fw, frameworks / fw.name, symlinks=True, dirs_exist_ok=True)
     if plugins.swiftpm_plugins(project):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))
