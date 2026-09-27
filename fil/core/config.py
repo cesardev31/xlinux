@@ -67,7 +67,8 @@ def tool_env():
     env = os.environ.copy()
     # <datos>/bin primero: trae xtool extraído del AppImage, que sí funciona
     # sin FUSE (el AppImage falla cuando lo lanza el snap de Flutter).
-    path = [str(data / "bin"), str(Path.home() / ".local/bin")]
+    # support/core/bin: xcrun sustituto (lo piden p. ej. los native assets de Flutter).
+    path = [str(SUPPORT / "core/bin"), str(data / "bin"), str(Path.home() / ".local/bin")]
     if swift_bin():
         path.insert(0, str(swift_bin()))
     env["PATH"] = os.pathsep.join(path + [env.get("PATH", "")])

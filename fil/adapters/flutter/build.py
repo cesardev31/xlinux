@@ -67,6 +67,22 @@ def ensure_engine(revision):
     return root
 
 
+def link_engine_into_flutter_cache(flutter_root, engine):
+    """`flutter assemble` busca los artefactos iOS en su propia caché (lo que
+    haría `flutter precache --ios`): se enlazan a los del directorio de datos
+    en vez de descargarlos otra vez al disco interno."""
+    cache = flutter_root / "bin/cache/artifacts/engine"
+    for mode in ("ios", "ios-release"):
+        link = cache / mode
+        if link.is_symlink() and link.resolve() == (engine / mode).resolve():
+            continue
+        if link.exists() and not link.is_symlink():
+            continue  # precache real: se respeta
+        if link.is_symlink():
+            link.unlink()
+        link.symlink_to(engine / mode)
+
+
 def compile_kernel(flutter_root, project, out):
     log("Dart -> kernel (frontend_server)")
     cache = flutter_root / "bin/cache"
@@ -107,6 +123,23 @@ def stub_app_framework(framework_dir, build_dir):
     toolchain.dylib(stub, framework_dir / "App", "@rpath/App.framework/App", extra=["-fapplication-extension"])
 
 
+def assemble_debug(project, frameworks):
+    """Debug: `flutter assemble` como lo invoca Xcode (xcode_backend.dart).
+
+    Genera App.framework (stub + flutter_assets + kernel) y corre los hooks de
+    native assets, que necesitan SdkRoot y `xcrun` (support/core/bin/xcrun)."""
+    log("App.framework + flutter_assets + native assets (flutter assemble)")
+    out = project.build_dir / "assemble"
+    run(["flutter", "--no-version-check", "assemble", f"--output={out}/",
+         "-dTargetPlatform=ios", "-dIosArchs=arm64", "-dTargetFile=lib/main.dart",
+         "-dBuildMode=debug", "-dConfiguration=Debug", f"-dSdkRoot={config.IPHONE_SDK}",
+         "-dTrackWidgetCreation=true", "-dTreeShakeIcons=false", "-dDartObfuscation=false",
+         "-dSplitDebugInfo=", "-dAction=build", f"-dSrcRoot={project.ios}",
+         "debug_ios_bundle_flutter_assets"],
+        cwd=project.dir, capture_output=True, text=True)
+    shutil.copytree(out / "App.framework", frameworks / "App.framework", symlinks=True, dirs_exist_ok=True)
+
+
 def build_assets(project, out):
     log("flutter_assets (flutter build bundle)")
     run(["flutter", "build", "bundle", "--debug" if project.debug else "--release",
@@ -142,6 +175,7 @@ def build(project_dir, debug=False):
     project = Project(project_dir, debug)
     flutter_root, revision = flutter_info()
     engine = ensure_engine(revision)
+    link_engine_into_flutter_cache(flutter_root, engine)
     flutter_fw_parent = engine / ("ios" if debug else "ios-release") / "Flutter.xcframework/ios-arm64"
 
     if project.app.exists():
@@ -152,12 +186,16 @@ def build(project_dir, debug=False):
 
     run(["flutter", "pub", "get"], cwd=project.dir, stdout=subprocess.DEVNULL)
     if debug:
-        stub_app_framework(app_framework, project.build_dir)
+        assemble_debug(project, frameworks)
     else:
         dill = project.build_dir / "app.dill"
         compile_kernel(flutter_root, project, dill)
         compile_aot(engine, dill, app_framework, project.build_dir)
-    build_assets(project, app_framework / "flutter_assets")
+        build_assets(project, app_framework / "flutter_assets")
+    # Native assets (hooks de Dart, p. ej. objective_c/path_provider por FFI):
+    # `flutter build bundle` los deja como frameworks; Xcode los embebe en el .app.
+    for fw in (project.dir / "build/native_assets/ios").glob("*.framework"):
+        shutil.copytree(fw, frameworks / fw.name, symlinks=True, dirs_exist_ok=True)
     if plugins.swiftpm_plugins(project):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))

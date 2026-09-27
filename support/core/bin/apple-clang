@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""clang que se comporta como el de Xcode para compilar para iOS.
+
+- Usa el linker de xtool: el lld del toolchain de Swift es más viejo que el
+  SDK de iOS 27 (ver fil/core/toolchain.py).
+- El clang de Apple deduce el target de `-arch` + `-m<plataforma>-version-min`
+  (o del -isysroot); el de Linux asumiría x86_64-linux, así que si no viene
+  `-target` se deduce aquí.
+"""
+import os
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fil.core import config  # noqa: E402
+
+args = sys.argv[1:]
+
+
+def infer_target():
+    if any(a in ("-target", "--target") or a.startswith("--target=") for a in args):
+        return []
+    arch = "arm64"
+    if "-arch" in args:
+        arch = args[args.index("-arch") + 1]
+    joined = " ".join(args)
+    for flag, suffix in (("-miphoneos-version-min=", ""), ("-mios-version-min=", ""),
+                         ("-mios-simulator-version-min=", "-simulator"),
+                         ("-miphonesimulator-version-min=", "-simulator")):
+        m = re.search(re.escape(flag) + r"(\S+)", joined)
+        if m:
+            return ["-target", f"{arch}-apple-ios{m.group(1)}{suffix}"]
+    m = re.search(r"-mmacosx-version-min=(\S+)", joined)
+    if m:
+        return ["-target", f"{arch}-apple-macos{m.group(1)}"]
+    sysroot = args[args.index("-isysroot") + 1] if "-isysroot" in args else ""
+    if "iPhoneSimulator" in sysroot:
+        return ["-target", f"{arch}-apple-ios{config.MIN_IOS}-simulator"]
+    if "iPhoneOS" in sysroot:
+        return ["-target", f"{arch}-apple-ios{config.MIN_IOS}"]
+    if "MacOSX" in sysroot:
+        return ["-target", f"{arch}-apple-macos12.0"]
+    return []
+
+
+clang = str(config.swift_bin() / ("clang++" if sys.argv[0].endswith("++") else "clang"))
+os.execv(clang, [clang, *infer_target(), "-fuse-ld=lld", "-B", str(config.TOOLSET_BIN),
+                 "-Wno-unused-command-line-argument", *args])

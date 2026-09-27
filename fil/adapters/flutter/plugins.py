@@ -186,7 +186,8 @@ def build(project, flutter_fw_parent):
     # Los plugins hacen `import Flutter`: en Xcode Flutter.framework llega por
     # FRAMEWORK_SEARCH_PATHS, aquí por -F en todos los targets.
     fw = str(flutter_fw_parent)
-    out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=project.package, extra_flags=[
+    shallow = [dep for _, _, package in plugins for dep in toolchain.exact_dependencies(package)]
+    out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=project.package, shallow=shallow, extra_flags=[
         "-Xswiftc", "-F", "-Xswiftc", fw, "-Xcc", f"-F{fw}",
         "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter"])
     if not (out / "Runner").exists():

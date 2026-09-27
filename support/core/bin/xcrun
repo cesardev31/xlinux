@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""xcrun sustituto: lo que Xcode resolvería, con LLVM y el SDK de xtool.
+
+Lo usan herramientas que asumen macOS, p. ej. los native assets de Flutter
+(hooks de Dart con native_toolchain_c):
+  xcrun --sdk iphoneos --show-sdk-path
+  xcrun --find clang
+  xcrun lipo|install_name_tool|otool|strip|dsymutil|codesign ...
+"""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fil.core import config  # noqa: E402
+
+HERE = Path(__file__).resolve().parent
+SDK = config.XTOOL_SDK / "Developer/Platforms"
+SDKS = {
+    "iphoneos": SDK / "iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk",
+    "iphonesimulator": SDK / "iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk",
+    "macosx": SDK / "MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+}
+
+
+def find(name):
+    swift = config.swift_bin()
+    llvm = Path("/usr/lib/llvm-21/bin")
+    tools = {
+        # clang con el linker de xtool (ver fil/core/toolchain.py)
+        "clang": HERE / "apple-clang", "clang++": HERE / "apple-clang++", "cc": HERE / "apple-clang",
+        "c++": HERE / "apple-clang++",
+        "ld": config.TOOLSET_BIN / "ld64.lld",
+        "dsymutil": config.TOOLSET_BIN / "dsymutil",
+        "ar": swift / "llvm-ar" if swift else None,
+        "nm": swift / "llvm-nm" if swift else None,
+        "swift": swift / "swift" if swift else None,
+        "swiftc": swift / "swiftc" if swift else None,
+        "lipo": llvm / "llvm-lipo",
+        "install_name_tool": llvm / "llvm-install-name-tool",
+        "otool": llvm / "llvm-otool",
+        "strip": llvm / "llvm-strip",
+        # La firma final la hace xtool sobre el .app completo (incluye frameworks).
+        "codesign": HERE / "noop",
+    }
+    tool = tools.get(name)
+    if tool and Path(tool).exists():
+        return str(tool)
+    return shutil.which(name)
+
+
+def main(argv):
+    sdk = "iphoneos"
+    args = list(argv)
+    while args and args[0].startswith("-"):
+        opt = args.pop(0)
+        if opt in ("--sdk", "-sdk"):
+            sdk = args.pop(0)
+        elif opt == "--show-sdk-path":
+            path = SDKS.get(sdk)
+            if not path or not path.exists():
+                sys.exit(f"xcrun: error: SDK \"{sdk}\" cannot be located")
+            print(path)
+            return
+        elif opt == "--show-sdk-version":
+            print("27.0")
+            return
+        elif opt == "--show-sdk-platform-path":
+            print(SDKS[sdk].parent.parent.parent)
+            return
+        elif opt in ("--find", "-f"):
+            path = find(args.pop(0))
+            if not path:
+                sys.exit(1)
+            print(path)
+            return
+        elif opt in ("--run", "-r", "--log", "-l", "--verbose", "-v", "--no-cache", "-n"):
+            continue
+        else:
+            sys.exit(f"xcrun: error: opción no soportada {opt}")
+    if not args:
+        sys.exit("xcrun: error: falta la herramienta")
+    tool = find(args[0])
+    if not tool:
+        sys.exit(f"xcrun: error: unable to find utility \"{args[0]}\"")
+    os.execv(tool, [tool, *args[1:]])
+
+
+main(sys.argv[1:])

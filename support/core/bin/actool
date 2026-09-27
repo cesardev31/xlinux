@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""actool sustituto: compila asset catalogs (.xcassets) sin Xcode.
+
+El actool de Apple produce Assets.car (formato binario privado de CoreUI).
+Aquí cada imageset se escribe como PNG sueltos (`nombre@2x.png`,
+`nombre@3x.png`, `nombre@2x~ipad.png`) en el directorio de salida. UIKit los
+encuentra igual: `UIImage(named:in:compatibleWith:)` busca primero en el
+catálogo compilado y luego en los archivos del bundle.
+
+- PNG/JPG: se copian con su escala.
+- PDF/SVG vectoriales: se rasterizan a @2x y @3x (pdftocairo / cairosvg).
+- AppIcon (--app-icon): íconos + CFBundleIcons en el Info.plist parcial.
+- colorset/dataset/symbolset: no tienen equivalente sin Assets.car → warning.
+- Se pierde "template-rendering-intent" (el ícono no se tiñe solo).
+
+Implementa la interfaz que usan Xcode / Swift Build (AssetCatalogCompiler.xcspec).
+"""
+
+import json
+import os
+import plistlib
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fil.core import config  # noqa: E402
+
+# cairosvg vive en el venv del directorio de datos: re-ejecutarse con ese Python.
+try:
+    import cairosvg
+except ImportError:
+    venv_python = config.data_dir() / "py-tools/bin/python"
+    if venv_python.exists() and sys.executable != str(venv_python) and not os.environ.get("FIL_ACTOOL_REEXEC"):
+        os.environ["FIL_ACTOOL_REEXEC"] = "1"
+        os.execv(str(venv_python), [str(venv_python), __file__, *sys.argv[1:]])
+    cairosvg = None
+
+VERSION_PLIST = {"com.apple.actool.version": {"bundle-version": "24000", "short-bundle-version": "27.0"}}
+VECTOR_SCALES = (2, 3)
+
+
+def warn(msg):
+    print(f"warning: {msg}", flush=True)
+
+
+def parse(argv):
+    opts = {"inputs": [], "app_icon": None, "compile": None, "dependency_info": None,
+            "partial_plist": None, "generated": [], "output_format": "human-readable-text"}
+    value_opts = {"--compile": "compile", "--export-dependency-info": "dependency_info",
+                  "--output-partial-info-plist": "partial_plist", "--app-icon": "app_icon",
+                  "--output-format": "output_format"}
+    it = iter(argv)
+    for arg in it:
+        if arg in value_opts:
+            opts[value_opts[arg]] = next(it)
+        elif arg.startswith("--generate-") and arg.endswith(("-symbols", "-path", "-index")):
+            opts["generated"].append((arg, next(it)))
+        elif arg.startswith("--"):
+            # Opciones con valor que no afectan el resultado aquí.
+            if arg in ("--enable-on-demand-resources", "--development-region", "--target-device",
+                       "--minimum-deployment-target", "--platform", "--filter-for-device-model",
+                       "--filter-for-device-os-version", "--sticker-pack-identifier-prefix",
+                       "--product-type", "--bundle-identifier", "--accent-color",
+                       "--widget-background-color", "--include-all-app-icons",
+                       "--alternate-app-icon", "--launch-image", "--compile-dependency-info",
+                       "--generate-swift-asset-symbol-extensions"):
+                next(it, None)
+        else:
+            opts["inputs"].append(arg)
+    return opts
+
+
+def svg_size(path):
+    import re
+    text = Path(path).read_text(errors="replace")
+    head = text[:4000]
+
+    def attr(name):
+        m = re.search(rf'\b{name}="([\d.]+)(px)?"', head)
+        return float(m.group(1)) if m else None
+
+    w, h = attr("width"), attr("height")
+    if w and h:
+        return w, h
+    m = re.search(r'viewBox="[\d.\-]+[ ,]+[\d.\-]+[ ,]+([\d.]+)[ ,]+([\d.]+)"', head)
+    return (float(m.group(1)), float(m.group(2))) if m else (None, None)
+
+
+def render_vector(src, dst, scale):
+    if src.suffix.lower() == ".pdf":
+        prefix = str(dst.with_suffix(""))
+        subprocess.run(["pdftocairo", "-png", "-singlefile", "-transp", "-r", str(72 * scale), str(src), prefix],
+                       check=True, capture_output=True)
+        return True
+    if src.suffix.lower() == ".svg":
+        if cairosvg is None:
+            warn(f"sin cairosvg no se puede rasterizar {src.name}")
+            return False
+        cairosvg.svg2png(url=str(src), write_to=str(dst), scale=scale)
+        return True
+    return False
+
+
+def compile_imageset(imageset, name, out, outputs):
+    contents = json.loads((imageset / "Contents.json").read_text())
+    for image in contents.get("images", []):
+        filename = image.get("filename")
+        if not filename:
+            continue
+        src = imageset / filename
+        if not src.exists():
+            continue
+        idiom = image.get("idiom", "universal")
+        suffix = "~ipad" if idiom == "ipad" else ""
+        if idiom not in ("universal", "iphone", "ipad"):
+            continue
+        scale = image.get("scale")
+        ext = src.suffix.lower()
+        if ext in (".pdf", ".svg"):
+            scales = [int(scale[0])] if scale else VECTOR_SCALES
+            for s in scales:
+                dst = out / f"{name}{'' if s == 1 else f'@{s}x'}{suffix}.png"
+                try:
+                    if render_vector(src, dst, s):
+                        outputs.append(dst)
+                except Exception as e:  # un SVG raro no debe tumbar todo el catálogo
+                    warn(f"no se pudo rasterizar {imageset.name}/{filename}: {e}")
+                    break
+        elif ext in (".png", ".jpg", ".jpeg"):
+            s = scale or "1x"
+            dst = out / f"{name}{'' if s == '1x' else '@' + s}{suffix}{'.png' if ext == '.png' else ext}"
+            shutil.copy(src, dst)
+            outputs.append(dst)
+
+
+def compile_app_icon(iconset, out, outputs):
+    contents = json.loads((iconset / "Contents.json").read_text())
+    names = set()
+    for image in contents.get("images", []):
+        filename, size = image.get("filename"), image.get("size", "")
+        if not filename or image.get("idiom") not in ("iphone", "ipad", "universal") or size == "1024x1024":
+            continue
+        base = f"AppIcon{size}"
+        scale = image.get("scale", "1x")
+        dst = out / f"{base}{'' if scale == '1x' else '@' + scale}{'~ipad' if image['idiom'] == 'ipad' else ''}.png"
+        shutil.copy(iconset / filename, dst)
+        outputs.append(dst)
+        names.add(base)
+    if not names:
+        return {}
+    icons = {"CFBundlePrimaryIcon": {"CFBundleIconFiles": sorted(names)}}
+    return {"CFBundleIcons": icons, "CFBundleIcons~ipad": icons}
+
+
+def walk(folder, prefix, opts, out, outputs, partial):
+    for entry in sorted(folder.iterdir()):
+        if not entry.is_dir():
+            continue
+        name = entry.stem
+        if entry.suffix == ".imageset":
+            compile_imageset(entry, prefix + name, out, outputs)
+        elif entry.suffix == ".appiconset":
+            if name == opts["app_icon"]:
+                partial.update(compile_app_icon(entry, out, outputs))
+        elif entry.suffix in (".colorset", ".dataset", ".symbolset", ".imagestack", ".brandassets",
+                              ".launchimage", ".textureset", ".cubetextureset"):
+            warn(f"{entry.name}: {entry.suffix[1:]} no está soportado sin Assets.car; se omite")
+        elif not entry.suffix:
+            contents = entry / "Contents.json"
+            namespace = contents.exists() and json.loads(contents.read_text()).get(
+                "properties", {}).get("provides-namespace")
+            walk(entry, prefix + (name + "/" if namespace else ""), opts, out, outputs, partial)
+
+
+def write_dependency_info(path, inputs, outputs):
+    # Formato de Xcode (el mismo de `ld -dependency_info`): registros
+    # <opcode><cadena>\0 — 0x00 versión, 0x10 entrada, 0x40 salida.
+    data = b"\x00actool-27.0\x00"
+    data += b"".join(b"\x10" + str(p).encode() + b"\x00" for p in inputs)
+    data += b"".join(b"\x40" + str(p).encode() + b"\x00" for p in outputs)
+    Path(path).write_bytes(data)
+
+
+def main(argv):
+    if "--version" in argv:
+        sys.stdout.buffer.write(plistlib.dumps(VERSION_PLIST))
+        return 0
+    opts = parse(argv)
+    if not opts["compile"]:
+        print("error: actool (flutter-ios-linux) solo soporta --compile", file=sys.stderr)
+        return 1
+    out = Path(opts["compile"])
+    out.mkdir(parents=True, exist_ok=True)
+    outputs, partial, inputs = [], {}, []
+    for catalog in opts["inputs"]:
+        catalog = Path(catalog)
+        inputs.append(catalog)
+        walk(catalog, "", opts, out, outputs, partial)
+    if opts["partial_plist"]:
+        Path(opts["partial_plist"]).write_bytes(plistlib.dumps(partial))
+    if opts["dependency_info"]:
+        write_dependency_info(opts["dependency_info"], inputs, outputs)
+    for flag, path in opts["generated"]:
+        # Símbolos de assets (ImageResource/ColorResource, Xcode 15+): vacíos.
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("" if not path.endswith(".swift") else "import Foundation\n")
+    if opts["output_format"] == "xml1":
+        sys.stdout.buffer.write(plistlib.dumps({"com.apple.actool.compilation-results":
+                                                {"output-files": [str(p) for p in outputs]}}))
+    return 0
+
+
+sys.exit(main(sys.argv[1:]))
