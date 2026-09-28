@@ -1,5 +1,19 @@
+diff --git a/Sources/XKit/DeveloperServices/App IDs/DeveloperServicesAddAppOperation.swift b/Sources/XKit/DeveloperServices/App IDs/DeveloperServicesAddAppOperation.swift
+index d726e91..ac87271 100644
+--- a/Sources/XKit/DeveloperServices/App IDs/DeveloperServicesAddAppOperation.swift	
++++ b/Sources/XKit/DeveloperServices/App IDs/DeveloperServicesAddAppOperation.swift	
+@@ -206,7 +206,8 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
+         if var entitlementsArray = try? entitlements.entitlements(),
+             let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
+             let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement {
+-            let groups = groupsEntitlement.rawValue
++            // Free teams get at most one app group per app.
++            let groups = isFreeTeam ? Array(groupsEntitlement.rawValue.prefix(1)) : groupsEntitlement.rawValue
+ 
+             if let operation = DeveloperServicesAssignAppGroupsOperation(
+                 context: self.context,
 diff --git a/Sources/XKit/DeveloperServices/App IDs/Entitlements/DeveloperServicesCapability.swift b/Sources/XKit/DeveloperServices/App IDs/Entitlements/DeveloperServicesCapability.swift
-index 2dca463..48683a2 100644
+index 2dca463..2e92205 100644
 --- a/Sources/XKit/DeveloperServices/App IDs/Entitlements/DeveloperServicesCapability.swift	
 +++ b/Sources/XKit/DeveloperServices/App IDs/Entitlements/DeveloperServicesCapability.swift	
 @@ -73,9 +73,9 @@ extension DataProtectionEntitlement: EntitlementWithCapability {
@@ -9,8 +23,8 @@ index 2dca463..48683a2 100644
 -        // FIXME: Enable app groups on free accounts
 -        // but we need to always assign only one group
 -        DeveloperServicesCapability(.appGroups, isFree: false)
-+        // Free teams can register and assign app groups through the Xcode
-+        // DeveloperServices API (as AltStore/SideStore do).
++        // Free teams can use App Groups too; DeveloperServicesAddAppOperation
++        // assigns them at most one.
 +        DeveloperServicesCapability(.appGroups, isFree: true)
      }
  }

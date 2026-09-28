@@ -30,10 +30,12 @@ xlinux setup   # installs it over xtool's (keeping the original as .orig)
 
 [xtool](https://github.com/xtool-org/xtool) (MIT, © Kabir Oberai) drops App
 Groups when signing with a free Apple ID (a `FIXME` in
-`DeveloperServicesCapability.swift`). The Xcode DeveloperServices API does let
-free teams register and assign them, as AltStore/SideStore do: with this
-one-line patch a widget and its app share `UserDefaults(suiteName:)` on a free
-account. xtool renames groups to `group.XTL-<team>.<id>`, so apps should derive
+`DeveloperServicesCapability.swift`, which also asks to assign only one group
+on free teams). The Xcode DeveloperServices API does let free teams register
+and assign them, as AltStore/SideStore do: with this patch (App Groups allowed
+on free teams, at most one per app) a widget and its app share
+`UserDefaults(suiteName:)` on a free account. Submitted upstream as
+[xtool-org/xtool#284](https://github.com/xtool-org/xtool/pull/284). xtool renames groups to `group.XTL-<team>.<id>`, so apps should derive
 the group from their bundle ID (`"group." + Bundle.main.bundleIdentifier`).
 
 Base: tag `1.20.1`. Needs `libssl-dev` and `libimobiledevice-dev`.
