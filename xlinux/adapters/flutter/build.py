@@ -160,9 +160,23 @@ def compile_runner(project, flutter_fw_parent, obj, executable):
     toolchain.swiftc(args)
 
 
-def build(project_dir, debug=False, package=True):
+def flutter_run_kernel(project_dir):
+    """The debug kernel `flutter run` compiled right before calling the custom
+    device's install command (for the linux bundle it builds and we ignore).
+    It carries the run's --dart-define values, which our `flutter assemble`
+    doesn't receive. The kernel is platform-neutral: the plugin registrant
+    picks iOS at runtime, as with hot restart."""
+    build_id = Path(project_dir) / "build/flutter_assets/.last_build_id"
+    if not build_id.exists():
+        return None
+    kernel = Path(project_dir) / ".dart_tool/flutter_build" / build_id.read_text().strip() / "app.dill"
+    return kernel if kernel.exists() else None
+
+
+def build(project_dir, debug=False, package=True, kernel=None):
     """Build the app and return the Project with Runner.app (and the .ipa if
-    `package`; installing on the iPhone only needs the uncompressed .app)."""
+    `package`; installing on the iPhone only needs the uncompressed .app).
+    `kernel`: debug kernel to ship instead of the one `flutter assemble` makes."""
     config.require_data_dir()
     toolchain.require_sdk()
     if not debug:
@@ -181,6 +195,8 @@ def build(project_dir, debug=False, package=True):
 
     run(["flutter", "pub", "get"], cwd=project.dir, stdout=subprocess.DEVNULL)
     assemble(project, frameworks)
+    if debug and kernel:
+        shutil.copyfile(kernel, app_framework / "flutter_assets/kernel_blob.bin")
     if plugins.swiftpm_plugins(project):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))

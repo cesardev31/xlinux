@@ -51,7 +51,8 @@ def cmd_device_ping(_args):
 def cmd_device_install(_args):
     # `flutter run` already built its bundle for "linux"; we install our own iOS
     # build of the same project (Flutter runs these commands from its root).
-    project = flutter_build.build(os.getcwd(), debug=True, package=False)
+    project = flutter_build.build(os.getcwd(), debug=True, package=False,
+                                  kernel=flutter_build.flutter_run_kernel(os.getcwd()))
     device.install(project.app, device.first_device()[0])
 
 
