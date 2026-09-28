@@ -150,6 +150,43 @@ def compile_imageset(imageset, name, out, outputs):
             outputs.append(dst)
 
 
+# Xcode 14+ "single size" app icons: one 1024 px image, from which Xcode
+# generates every size. Without Assets.car, the loose PNGs iOS looks up by name.
+SINGLE_SIZE_ICONS = {
+    "iphone": [("29x29", 2), ("29x29", 3), ("40x40", 2), ("40x40", 3), ("60x60", 2), ("60x60", 3)],
+    "ipad": [("29x29", 1), ("29x29", 2), ("40x40", 1), ("40x40", 2), ("76x76", 1), ("76x76", 2),
+             ("83.5x83.5", 2)],
+}
+
+
+def resize_png(src, dst, pixels):
+    """Resize with Pillow (a dependency of cairosvg, in the data directory's venv)."""
+    code = ("import sys; from PIL import Image; "
+            "Image.open(sys.argv[1]).resize((int(sys.argv[3]),) * 2, Image.LANCZOS).save(sys.argv[2])")
+    try:
+        import PIL  # noqa: F401
+        python = sys.executable
+    except ImportError:
+        python = str(deps.ensure_cairosvg())
+    subprocess.run([python, "-c", code, str(src), str(dst), str(pixels)], check=True)
+
+
+def single_size_app_icon(iconset, image, out, outputs):
+    src = iconset / image["filename"]
+    icons = {}
+    for idiom, sizes in SINGLE_SIZE_ICONS.items():
+        names = []
+        for size, scale in sizes:
+            points = float(size.split("x")[0])
+            dst = out / f"AppIcon{size}{'' if scale == 1 else f'@{scale}x'}{'~ipad' if idiom == 'ipad' else ''}.png"
+            resize_png(src, dst, round(points * scale))
+            outputs.append(dst)
+            if f"AppIcon{size}" not in names:
+                names.append(f"AppIcon{size}")
+        icons[idiom] = {"CFBundlePrimaryIcon": {"CFBundleIconFiles": names}}
+    return {"CFBundleIcons": icons["iphone"], "CFBundleIcons~ipad": icons["ipad"]}
+
+
 def compile_app_icon(iconset, out, outputs):
     contents = json.loads((iconset / "Contents.json").read_text())
     names = set()
@@ -164,7 +201,10 @@ def compile_app_icon(iconset, out, outputs):
         outputs.append(dst)
         names.add(base)
     if not names:
-        return {}
+        single = [image for image in contents.get("images", [])
+                  if image.get("filename") and image.get("size") == "1024x1024"
+                  and image.get("idiom") == "universal" and not image.get("appearances")]
+        return single_size_app_icon(iconset, single[0], out, outputs) if single else {}
     icons = {"CFBundlePrimaryIcon": {"CFBundleIconFiles": sorted(names)}}
     return {"CFBundleIcons": icons, "CFBundleIcons~ipad": icons}
 

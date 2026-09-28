@@ -5,8 +5,9 @@ Build, install and debug apps on a real iPhone **from Linux, no Mac required**.
 It supports **Flutter** (release builds, debug with hot reload, the iPhone as
 a device in VS Code / `flutter run`, real native plugins: Firebase, Stripe,
 Google Sign-In, WebView…) and **Expo / React Native** (debug builds with
-`expo-dev-client`, JavaScript served by Metro; the whole CocoaPods project,
-React Native, Reanimated, Expo modules and Google Sign-In compiled on Linux).
+`expo-dev-client` and Metro, and release builds with the JavaScript bundled as
+Hermes bytecode; the whole CocoaPods project, React Native, Reanimated, Expo
+modules and Google Sign-In compiled on Linux).
 The core is framework-agnostic.
 
 It does not reimplement Xcode. It glues together open-source pieces that
@@ -17,6 +18,7 @@ and fills the gaps where they didn't fit. Credits are [at the end](#credits-and-
 flutter run -d iphone-linux        # debug + hot reload (or pick the iPhone in VS Code)
 xlinux run                         # Flutter: release build, install, launch, logs
                                    # Expo: debug build, install, launch, Metro
+xlinux run --release               # Expo: release build (JS bundled), install, launch, logs
 xlinux build [--debug] [--install] [--project DIR]
 xlinux doctor                      # diagnostics
 xlinux setup                       # prepare the environment (once)
@@ -45,7 +47,7 @@ production Flutter apps.
 | App extensions (e.g. WidgetKit widgets) from the Xcode project, Swift sources | ✅ |
 | Pods with Objective-C/C (Flutter's podspec → SwiftPM conversion) | ❌ |
 | Expo / React Native, debug (expo-dev-client + Metro): `pod install`, 49 pods incl. React Native, Reanimated, Screens, Expo modules, Google Sign-In; tested with Expo 56 / RN 0.85 | ✅ |
-| Expo / React Native release (JavaScript bundled in the app) | 🔜 |
+| Expo / React Native release: JavaScript bundled as Hermes bytecode, prebuilt frameworks switched to their release flavor, runs without Metro | ✅ |
 
 ## How it works
 
@@ -67,6 +69,8 @@ production Flutter apps.
 | Xcode building `Pods.xcodeproj` and the app target | `xlinux/core/xcode/`: reads the project with CocoaPods' `xcodeproj` gem, resolves build settings the way Xcode layers them (xcconfigs, `$(inherited)`, conditional keys) and compiles each target with clang/swiftc, cached per target |
 | `ExpoModulesJSI`'s xcodebuild script phase | SwiftPM for iOS + a small patch for Swift 6.4 (`support/patches/`), relinked and assembled like its own script does |
 | Expo's Swift macro plugin (macOS binary on npm) | built from its sources for Linux, once per version |
+| Xcode's script phases (flavor switches, `app.config`, "Bundle React Native code and images") | run as Xcode runs them, with the target's build settings as environment; `hermesc` is hermes-compiler's Linux build (same version React Native depends on) |
+| single-size app icons (one 1024 px image) | the actool stand-in generates the iPhone/iPad sizes, like Xcode does |
 
 ## Architecture
 
@@ -165,7 +169,8 @@ From the project folder (with `node_modules` installed):
 
 ```
 xlinux run            # debug build, install, launch the app and start Metro
-xlinux build --debug  # just build (add --install to install)
+xlinux run --release  # release build: JavaScript bundled, no Metro needed
+xlinux build [--debug] [--install]
 ```
 
 It does what `expo run:ios` does on a Mac: `expo prebuild` generates `ios/`
@@ -173,10 +178,13 @@ It does what `expo run:ios` does on a Mac: `expo prebuild` generates `ios/`
 `ios/Pods`, and every pod plus the app target is compiled; build products go to
 the data directory. The first build takes a while (≈20-30 min for a
 medium-sized app: it also builds `ExpoModulesJSI` and Expo's macro plugin);
-after that only changed targets are rebuilt. The app uses `expo-dev-client`:
-open it, pick the Metro server `xlinux run` prints (or type its URL) with the
-iPhone on the same network as the computer, and JavaScript changes reload
-live.
+after that only changed targets are rebuilt. The debug app uses
+`expo-dev-client`: open it, pick the Metro server `xlinux run` prints (or type
+its URL) with the iPhone on the same network as the computer, and JavaScript
+changes reload live. A release build runs the pods' script phases that switch
+the prebuilt frameworks (Expo modules, React Native, Hermes) to their release
+flavor and React Native's bundle phase (`expo export:embed` + `hermesc`); it
+works without the computer.
 
 ## Seeing and controlling the iPhone
 
@@ -336,18 +344,18 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   hardcoding it.
 - Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
-- Expo: debug only for now (release needs the JavaScript bundle and Hermes
-  bytecode embedded); single-image app icons (Expo's 1024 px `AppIcon`) aren't
-  converted yet; the launch storyboard becomes a plain `UILaunchScreen`;
-  `pod install` writes `ios/Pods` (~1 GB) inside the project, as on a Mac.
+- Expo: the launch storyboard (splash) becomes a plain `UILaunchScreen`;
+  debug and release share `ios/Pods`, so switching configuration swaps the
+  prebuilt frameworks each time; `pod install` writes `ios/Pods` (~1 GB)
+  inside the project, as on a Mac.
 
 ## Roadmap
 
 1. Dart changes without reinstalling (push the kernel into the app's container
    and launch with `--flutter-assets-dir`).
 2. Objective-C/C pods in the CocoaPods conversion.
-3. Expo / React Native: release builds (embedded bundle), app icon from a single
-   1024 px image, upstreaming the `expo-modules-jsi` patch.
+3. Expo / React Native: the splash screen without ibtool, upstreaming the
+   `expo-modules-jsi` patch.
 
 ## Credits and licenses
 
