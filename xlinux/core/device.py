@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -182,11 +183,22 @@ def stream_logs(process_name="Runner", match=None):
     subprocess.run(cmd, env=config.tool_env())
 
 
+def _tunneld_has(udid):
+    """¿Está corriendo `tunneld` (túnel de kernel) con este iPhone?"""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:49151/", timeout=2) as r:
+            return udid in json.loads(r.read())
+    except (OSError, ValueError):
+        return False
+
+
 def _visual_command(udid, *args):
-    """Comando CoreDevice fijado al iPhone indicado y con túnel userspace."""
+    """Comando CoreDevice fijado al iPhone indicado: por el túnel de kernel si
+    `tunneld` está corriendo (video mucho más fluido), si no por el userspace."""
     env = config.tool_env()
     env["PYMOBILEDEVICE3_UDID"] = udid
-    return [config.pymobiledevice3_python(), "-m", "pymobiledevice3", *args, "--userspace"], env
+    tunnel = ["--tunnel", udid] if _tunneld_has(udid) else ["--userspace"]
+    return [config.pymobiledevice3_python(), "-m", "pymobiledevice3", *args, *tunnel], env
 
 
 def screenshot(path, udid):
@@ -263,6 +275,9 @@ def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
                "--bind", bind, port_option, str(port)]
     if password:
         command += ["--password", password]
+    if mode == "web":
+        # El audio de CoreDevice es AAC-ELD y su decodificador solo existe en macOS.
+        command.append("--no-audio")
     if mode == "vnc":
         if audio:
             command.append("--audio")
@@ -271,7 +286,16 @@ def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
     cmd, env = _visual_command(udid, *command)
     protocol = "http" if mode == "web" else "vnc"
     log(f"Pantalla del iPhone en {protocol}://{bind}:{port} (Ctrl+C para salir)")
-    return subprocess.run(cmd, env=env).returncode
+    process = subprocess.Popen(cmd, env=env)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        # Ctrl+C también le llega al servidor, que se cierra solo: esperarlo.
+        try:
+            return process.wait(timeout=15)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            process.kill()
+            return 130
 
 
 def free_port():

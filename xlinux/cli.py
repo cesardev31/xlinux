@@ -157,4 +157,9 @@ def main():
     p.set_defaults(func=cmd_agent_input)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        result = args.func(args)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    if isinstance(result, int) and result not in (0, 130):
+        sys.exit(result)
