@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Mide el ciclo de debug como lo usa VS Code (`flutter run --machine`).
+"""Measure the debug loop the way VS Code drives it (`flutter run --machine`).
 
-  tools/bench_debug.py <proyecto> <archivo.dart> <texto a reemplazar>
+  tools/bench_debug.py <project> <file.dart> <text to replace>
 
-Reporta: arranque (hasta app.started) y dos hot reloads, cambiando el texto
-dado en el archivo (se restaura al final). Usar con un proyecto de prueba.
+Reports startup (until app.started) and two hot reloads, changing the given
+text in the file (restored at the end). Use it with a throwaway project.
 """
 
 import json
@@ -15,7 +15,7 @@ from pathlib import Path
 
 project, dart_file, needle = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 original = (project / dart_file).read_text()
-assert needle in original, f"no encuentro {needle!r} en {dart_file}"
+assert needle in original, f"{needle!r} not found in {dart_file}"
 
 proc = subprocess.Popen(["flutter", "run", "--machine", "-d", "iphone-linux"], cwd=project,
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -29,7 +29,7 @@ def wait_for(pred, timeout=900):
     while time.time() < deadline:
         line = proc.stdout.readline()
         if not line:
-            raise SystemExit("flutter run terminó")
+            raise SystemExit("flutter run exited")
         if not line.startswith("[{"):
             continue
         try:
@@ -63,8 +63,8 @@ try:
     t_start = time.time()
     wait_for(lambda m: m.get("event") == "app.started")
     t_started = time.time()
-    print(f"build + instalación + lanzamiento: {t_start - t0:6.1f} s")
-    print(f"lanzamiento → app.started:        {t_started - t_start:6.1f} s")
+    print(f"build + install + launch:         {t_start - t0:6.1f} s")
+    print(f"launch → app.started:             {t_started - t_start:6.1f} s")
     for n in (1, 2):
         dt, message = reload(n, f"{needle} ({n})")
         print(f"hot reload {n}:                     {dt:6.1f} s  ({message})")

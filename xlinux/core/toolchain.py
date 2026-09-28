@@ -1,4 +1,4 @@
-"""Compilar para iOS arm64 con el SDK que xtool extrae de Xcode.xip."""
+"""Compile for iOS arm64 with the SDK xtool extracts from Xcode.xip."""
 
 import json
 import re
@@ -16,11 +16,11 @@ def target():
 def require_sdk():
     for path in (config.IPHONE_SDK, config.TOOLSET_BIN):
         if not path.exists():
-            sys.exit(f"error: falta {path}. Corre `xtool setup` (ver `xlinux doctor`).")
+            sys.exit(f"error: {path} is missing. Run `xtool setup` (see `xlinux doctor`).")
 
 
-# El lld del toolchain de Swift es más viejo que el SDK de iOS 27: se usa el de
-# xtool (toolset/bin) vía -B.
+# The Swift toolchain's lld is older than the iOS 27 SDK: use xtool's
+# (toolset/bin) through -B.
 LINKER_FLAGS = ["-fuse-ld=lld", "-B", str(config.TOOLSET_BIN)]
 SWIFT_LINKER_FLAGS = ["-use-ld=lld", "-Xclang-linker", "-B", "-Xclang-linker", str(config.TOOLSET_BIN)]
 
@@ -32,7 +32,7 @@ def clang(args, **kw):
 
 
 def dylib(source, output, install_name, extra=()):
-    """Compila un dylib con los rpath habituales de una app iOS."""
+    """Build a dylib with the usual iOS app rpaths."""
     return clang([*LINKER_FLAGS, "-dynamiclib",
                   "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
                   "-Xlinker", "-rpath", "-Xlinker", "@loader_path/Frameworks",
@@ -48,7 +48,7 @@ def swiftc(args, **kw):
 
 
 def exact_dependencies(package):
-    """[(url, versión)] de las dependencias remotas con `exact:` de un paquete."""
+    """[(url, version)] of a package's remote dependencies pinned with `exact:`."""
     dump = json.loads(output(["swift", "package", "dump-package", "--package-path", package]))
     found = []
     for dep in dump.get("dependencies", []):
@@ -61,10 +61,10 @@ def exact_dependencies(package):
 
 
 def shallow_mirror(url, version):
-    """Copia local con solo el tag pedido (sin historial).
+    """Local copy holding only the requested tag (no history).
 
-    SwiftPM siempre hace `git clone --mirror` completo; para firebase-ios-sdk
-    eso son varios GB. Con esta copia configurada como mirror baja ~100x menos."""
+    SwiftPM always does a full `git clone --mirror`; for firebase-ios-sdk
+    that's several GB. Configured as a mirror, this copy downloads ~100x less."""
     name = re.sub(r"[^A-Za-z0-9._-]", "_", url.split("://", 1)[-1].removesuffix(".git"))
     repo = config.data_dir() / "git-mirrors" / f"{name}.git"
     tags = output(["git", "ls-remote", "--tags", url, version, f"v{version}"]).split()
@@ -75,17 +75,17 @@ def shallow_mirror(url, version):
         run(["git", "init", "-q", "--bare", repo])
     have = output(["git", "-C", repo, "tag", "--list", tag]).strip()
     if not have:
-        log(f"Descargando {url.rsplit('/', 1)[-1]} {tag} sin historial")
+        log(f"Downloading {url.rsplit('/', 1)[-1]} {tag} without history")
         run(["git", "-C", repo, "fetch", "-q", "--depth", "1", url, f"refs/tags/{tag}:refs/tags/{tag}"])
     return repo
 
 
 def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=()):
-    """`swift build` para iOS. Devuelve el directorio con los productos.
+    """`swift build` for iOS. Returns the products directory.
 
-    La caché de repos y la compilación van al directorio de datos (SSD):
-    dependencias como Firebase pesan varios GB. `shallow`: [(url, versión)]
-    que se bajan sin historial y se usan como mirror (ver shallow_mirror)."""
+    The repository cache and build directory live in the data directory:
+    dependencies such as Firebase weigh several GB. `shallow`: [(url, version)]
+    downloaded without history and used as mirrors (see shallow_mirror)."""
     configuration = "debug" if debug else "release"
     name = scratch_name or package.name
     scratch = config.data_dir() / "spm-build" / name
@@ -97,11 +97,11 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
             run(["swift", "package", "--package-path", package, "--config-path", config_path,
                  "config", "set-mirror", "--original", url, "--mirror", str(mirror)],
                 capture_output=True, text=True)
-    # Swift 6.4 usa Swift Build por defecto; se configura como lo hace xtool
-    # (PackLib/BuildSettings.swift): triple + toolset-swb.json + plataformas del SDK.
-    # actool (support/core/bin/actool): Swift Build lo busca en el PATH para
-    # compilar catálogos, pero verifica su versión relativo al paquete (y no
-    # acepta symlinks), así que se deja ahí un lanzador.
+    # Swift 6.4 uses Swift Build by default; configure it the way xtool does
+    # (PackLib/BuildSettings.swift): triple + toolset-swb.json + SDK platforms.
+    # actool (support/core/bin/actool): Swift Build looks it up in PATH to
+    # compile asset catalogs, but checks its version relative to the package
+    # (and rejects symlinks), so a launcher script is placed there.
     launcher = package / "actool"
     launcher.write_text(f'#!/bin/sh\nexec "{config.SUPPORT / "core/bin/actool"}" "$@"\n')
     launcher.chmod(0o755)
@@ -113,9 +113,9 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
          "--toolset", config.XTOOL_SDK / "toolset-swb.json", "-c", configuration,
          "--package-path", package, "--scratch-path", scratch, "--config-path", config_path,
          "--cache-path", config.data_dir() / "swiftpm-cache",
-         # Módulos como _PassKit_SwiftUI (PayWithApplePayButton) solo existen
-         # como cross-import overlays; toolset.json de xtool lo activa, el de
-         # Swift Build no.
+         # Modules like _PassKit_SwiftUI (PayWithApplePayButton) only exist as
+         # cross-import overlays; xtool's toolset.json enables them, Swift
+         # Build's doesn't.
          "-Xswiftc", "-Xfrontend", "-Xswiftc", "-enable-cross-import-overlays",
          *extra_flags],
         cwd=package, env=env)
@@ -127,9 +127,9 @@ FAT_MAGICS = (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")
 
 
 def thin_frameworks(app, arch="arm64"):
-    """Deja solo `arch` en los binarios universales de Frameworks/ (lo que
-    hace Xcode con "embed and thin"). `flutter assemble` en release genera
-    App.framework universal, y firmar binarios "gordos" traba a xtool."""
+    """Keep only `arch` in universal binaries under Frameworks/ (what Xcode's
+    "embed and thin" does). A release `flutter assemble` produces a universal
+    App.framework, and signing fat binaries hangs xtool."""
     for binary in (app / "Frameworks").glob("*.framework/*"):
         if binary.is_file() and binary.name == binary.parent.stem:
             with open(binary, "rb") as f:
@@ -142,13 +142,13 @@ MH_DYLIB = 6
 
 
 def _is_dynamic_library(binary):
-    """True solo para Mach-O MH_DYLIB (o universales cuyo primer slice lo es).
-    Los frameworks estáticos (archivos .a o MH_OBJECT) ya quedan enlazados
-    dentro del ejecutable y no se embeben en Frameworks/."""
+    """True only for Mach-O MH_DYLIB (or universal binaries whose first slice
+    is one). Static frameworks (.a archives or MH_OBJECT) are already linked
+    into the executable and must not be embedded in Frameworks/."""
     try:
         with open(binary, "rb") as f:
             head = f.read(8)
-            if head[:4] in FAT_MAGICS:  # universal (big-endian): primer slice
+            if head[:4] in FAT_MAGICS:  # universal (big-endian): first slice
                 f.seek(8 + 8)
                 offset = int.from_bytes(f.read(4), "big")
                 f.seek(offset)
@@ -164,8 +164,8 @@ def _is_dynamic_library(binary):
 
 
 def pack_swiftpm_outputs(out, app, executable, skip_frameworks=()):
-    """Copia al .app el ejecutable, los bundles de recursos y los frameworks
-    dinámicos que dejó SwiftPM (igual que el Packer de xtool)."""
+    """Copy the executable, resource bundles and dynamic frameworks SwiftPM
+    produced into the .app (like xtool's Packer)."""
     shutil.copy(out / executable, app / executable)
     for bundle in out.glob("*.bundle"):
         shutil.copytree(bundle, app / bundle.name, symlinks=True, dirs_exist_ok=True)

@@ -1,8 +1,8 @@
-"""Correr herramientas de línea de comandos de macOS en Linux con Darling.
+"""Run macOS command-line tools on Linux with Darling.
 
-Se inyecta support/core/darling_compat.c (finge macOS 12 en `uname` y emula
-`vm_map` con alineación, que Darling no soporta). Las rutas absolutas de
-Linux se ven dentro de Darling bajo /Volumes/SystemRoot.
+support/core/darling_compat.c is injected (it reports macOS 12 from `uname`
+and emulates aligned `vm_map`, which Darling doesn't support). Absolute Linux
+paths are visible inside Darling under /Volumes/SystemRoot.
 """
 
 import sys
@@ -26,7 +26,7 @@ def translate(arg):
 def run_macos_tool(binary, args, **kw):
     shim = config.compat_shim()
     if not shim.exists():
-        sys.exit("error: falta el shim de Darling. Corre `xlinux setup`.")
+        sys.exit("error: the Darling compatibility shim is missing. Run `xlinux setup`.")
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     return run(["darling", "shell", "env", f"DYLD_INSERT_LIBRARIES={ROOT}{shim}",

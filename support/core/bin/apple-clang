@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""clang que se comporta como el de Xcode para compilar para iOS.
+"""clang that behaves like Xcode's when compiling for iOS.
 
-- Usa el linker de xtool: el lld del toolchain de Swift es más viejo que el
-  SDK de iOS 27 (ver xlinux/core/toolchain.py).
-- El clang de Apple deduce el target de `-arch` + `-m<plataforma>-version-min`
-  (o del -isysroot); el de Linux asumiría x86_64-linux, así que si no viene
-  `-target` se deduce aquí.
+- Uses xtool's linker: the Swift toolchain's lld is older than the iOS 27
+  SDK (see xlinux/core/toolchain.py).
+- Apple's clang infers the target from `-arch` + `-m<platform>-version-min`
+  (or from -isysroot); Linux's would assume x86_64-linux, so when no
+  `-target` is given it's inferred here.
 """
 import os
 import re

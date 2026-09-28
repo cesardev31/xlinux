@@ -1,15 +1,14 @@
-"""Servidor MCP: que un agente vea y maneje el iPhone mientras desarrolla.
+"""MCP server: lets an agent see and drive the iPhone while developing.
 
-    xlinux mcp          (lo registra en Claude Code: claude mcp add xlinux -- xlinux mcp)
+    xlinux mcp          (register it in Claude Code: claude mcp add xlinux -- xlinux mcp)
 
-Corre con el Python de pymobiledevice3 (lo lanza `xlinux mcp`) y mantiene
-abiertos el túnel con el iPhone y la sesión de toque de CoreDevice, así cada
-acción no reabre conexiones (con la CLI cada captura tardaba ~3 s).
+Runs on pymobiledevice3's Python (launched by `xlinux mcp`) and keeps the
+tunnel to the iPhone and the CoreDevice touch session open, so actions don't
+reopen connections (through the CLI each screenshot took ~3 s).
 
-Coordenadas: siempre normalizadas 0..1 (x de izquierda a derecha, y de arriba
-a abajo), independientes del modelo de iPhone y del tamaño de la captura.
-Pensado para apps en desarrollo: el agente puede tocar cualquier cosa del
-teléfono.
+Coordinates are always normalized 0..1 (x left→right, y top→bottom),
+independent of the iPhone model and the screenshot size. Meant for apps under
+development: the agent can touch anything on the phone.
 """
 
 import asyncio
@@ -51,19 +50,20 @@ HID_MAX = 65535
 server = MCPServer(
     name="xlinux",
     instructions=(
-        "Controla un iPhone real conectado por USB a Linux (xlinux). Coordenadas "
-        "normalizadas 0..1 (x izquierda→derecha, y arriba→abajo). Flujo típico: "
-        "screenshot → tap/swipe/type_text (devuelven captura tras la acción) → "
-        "flutter_hot_reload tras editar código Dart → screenshot para verificar. "
-        "Úsalo solo con apps de desarrollo: no hagas compras, pagos, borrados ni "
-        "envíos de mensajes sin confirmación del usuario."
+        "Controls a real iPhone connected over USB to Linux (xlinux). Coordinates "
+        "are normalized 0..1 (x left→right, y top→bottom). Typical loop: "
+        "screenshot → tap/swipe/type_text (they return a screenshot after the "
+        "action) → flutter_hot_reload after editing Dart code → screenshot to "
+        "verify. Use it only with apps under development: never make purchases, "
+        "payments, deletions or send messages without the user's confirmation."
     ),
 )
 
 
 class Phone:
-    """Conexión persistente: túnel RSD (tunneld si está, si no userspace) y
-    sesión de toque abierta. Se reabre sola si el iPhone se desconecta."""
+    """Persistent connection: RSD tunnel (tunneld if available, otherwise
+    userspace) and an open touch session. Reopens itself if the iPhone
+    disconnects."""
 
     def __init__(self):
         self.stack = None
@@ -76,7 +76,7 @@ class Phone:
     async def _open(self):
         devices = [d for d in await list_devices() if d.connection_type == "USB"]
         if not devices:
-            raise RuntimeError("No hay ningún iPhone conectado por USB (¿desbloqueado y en 'Confiar'?)")
+            raise RuntimeError("No iPhone connected over USB (is it unlocked, and did you tap 'Trust'?)")
         self.udid = devices[0].serial
         self.stack = contextlib.AsyncExitStack()
         rsd = None
@@ -95,7 +95,7 @@ class Phone:
         self.stack = self.rsd = self.touch = self.keyboard = None
 
     async def run(self, action):
-        """Ejecuta `action(self)`; si la conexión se cayó, la reabre y reintenta una vez."""
+        """Run `action(self)`; if the connection dropped, reopen it and retry once."""
         async with self.lock:
             for attempt in (1, 2):
                 try:
@@ -118,7 +118,7 @@ phone = Phone()
 
 def _hid(value):
     if not 0.0 <= value <= 1.0:
-        raise ValueError("las coordenadas van de 0 a 1")
+        raise ValueError("coordinates must be between 0 and 1")
     return round(value * HID_MAX)
 
 
@@ -138,23 +138,23 @@ async def _capture(scale):
 
 @server.tool()
 async def screenshot(scale: float = 0.5) -> Image:
-    """Captura la pantalla del iPhone. `scale` reduce la imagen (0.5 = mitad) para
-    ahorrar tokens; las coordenadas de las acciones son 0..1, no píxeles."""
+    """Capture the iPhone screen. `scale` shrinks the image (0.5 = half) to save
+    tokens; action coordinates are 0..1, not pixels."""
     return await _capture(scale)
 
 
 async def _after(screenshot_after, wait, scale):
     if not screenshot_after:
         return "ok"
-    await asyncio.sleep(wait)  # dejar terminar la animación
+    await asyncio.sleep(wait)  # let the animation finish
     return await _capture(scale)
 
 
 @server.tool()
 async def tap(x: float, y: float, screenshot_after: bool = True, wait: float = 0.8,
               scale: float = 0.5) -> Image | str:
-    """Toca en (x, y), normalizados 0..1. Por defecto devuelve una captura
-    `wait` segundos después."""
+    """Tap at (x, y), normalized 0..1. By default returns a screenshot taken
+    `wait` seconds later."""
     hx, hy = _hid(x), _hid(y)
 
     async def action(p):
@@ -167,8 +167,8 @@ async def tap(x: float, y: float, screenshot_after: bool = True, wait: float = 0
 @server.tool()
 async def swipe(x1: float, y1: float, x2: float, y2: float, duration: float = 0.4,
                 screenshot_after: bool = True, wait: float = 0.8, scale: float = 0.5) -> Image | str:
-    """Arrastra el dedo de (x1, y1) a (x2, y2) (0..1). Para hacer scroll hacia
-    abajo en una lista: de y=0.7 a y=0.3."""
+    """Drag a finger from (x1, y1) to (x2, y2) (0..1). To scroll a list down:
+    from y=0.7 to y=0.3."""
     points = [_hid(v) for v in (x1, y1, x2, y2)]
 
     async def action(p):
@@ -181,10 +181,10 @@ async def swipe(x1: float, y1: float, x2: float, y2: float, duration: float = 0.
 
 @server.tool()
 async def type_text(text: str, screenshot_after: bool = False, scale: float = 0.5) -> Image | str:
-    """Escribe texto ASCII en el campo que tenga el foco (tócalo antes). Sin tildes ni ñ."""
+    """Type ASCII text into the focused field (tap it first). No accents or non-ASCII characters."""
     unsupported = sorted({ch for ch in text if ch not in ASCII_TO_HID})
     if unsupported:
-        raise ValueError(f"caracteres no soportados: {''.join(unsupported)!r} (solo ASCII)")
+        raise ValueError(f"unsupported characters: {''.join(unsupported)!r} (ASCII only)")
 
     async def action(p):
         svc = await p.touchscreen()
@@ -203,7 +203,7 @@ async def type_text(text: str, screenshot_after: bool = False, scale: float = 0.
 
 @server.tool()
 async def press_button(name: str) -> str:
-    """Pulsa un botón físico: home, lock, volume-up, volume-down, mute."""
+    """Press a hardware button: home, lock, volume-up, volume-down, mute."""
     button = ButtonName(name)
     page, code, hold = _NAMED_BUTTONS[button]
 
@@ -215,7 +215,7 @@ async def press_button(name: str) -> str:
             await asyncio.sleep(0.1)
 
     await phone.run(action)
-    return f"botón {name} pulsado"
+    return f"pressed {name}"
 
 
 def _app_summary(app):
@@ -225,7 +225,7 @@ def _app_summary(app):
 
 @server.tool()
 async def list_apps() -> list[dict]:
-    """Apps instaladas por el usuario (las de desarrollo tienen prefijo XTL-<equipo>. con cuenta gratis)."""
+    """User-installed apps (development apps carry an XTL-<team>. prefix with a free Apple ID)."""
     async def action(p):
         async with AppServiceService(p.rsd) as apps:
             return await apps.list_apps(include_hidden_apps=False, include_internal_apps=False,
@@ -237,9 +237,10 @@ async def list_apps() -> list[dict]:
 @server.tool()
 async def launch_app(bundle_id: str, screenshot_after: bool = True, wait: float = 2.0,
                      scale: float = 0.5) -> Image | str:
-    """Abre (o reinicia) una app instalada. Acepta el bundle ID del proyecto aunque
-    esté instalado con prefijo XTL-<equipo>. (cuenta gratis). Una app de Flutter en
-    debug solo arranca bien lanzada por `flutter run`/VS Code; usa esto para release."""
+    """Launch (or restart) an installed app. Accepts the project's bundle ID even
+    when it's installed with an XTL-<team>. prefix (free Apple ID). A Flutter app
+    in debug mode only starts correctly from `flutter run`/VS Code; use this for
+    release builds."""
     async def action(p):
         async with AppServiceService(p.rsd) as apps:
             installed = await apps.list_apps(include_hidden_apps=False, include_internal_apps=False,
@@ -247,7 +248,7 @@ async def launch_app(bundle_id: str, screenshot_after: bool = True, wait: float 
             ids = [a["bundleIdentifier"] for a in installed]
             real = next((i for i in ids if i == bundle_id or i.endswith("." + bundle_id)), None)
             if real is None:
-                raise ValueError(f"{bundle_id} no está instalada")
+                raise ValueError(f"{bundle_id} is not installed")
             await apps.launch_application(real, kill_existing=True)
 
     await phone.run(action)
@@ -255,7 +256,7 @@ async def launch_app(bundle_id: str, screenshot_after: bool = True, wait: float 
 
 
 def _flutter_runs():
-    """Procesos `flutter run` vivos: [(pid, cwd, inicio)]."""
+    """Live `flutter run` processes: [(pid, cwd, start time)]."""
     found = []
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
@@ -264,7 +265,7 @@ def _flutter_runs():
             argv = (proc / "cmdline").read_bytes().split(b"\0")
             if not any(a.endswith(b"flutter_tools.snapshot") for a in argv) or b"run" not in argv:
                 continue
-            if b"--machine" in argv:  # VS Code: recarga sola al guardar
+            if b"--machine" in argv:  # VS Code: reloads by itself on save
                 continue
             found.append((int(proc.name), os.readlink(proc / "cwd"), (proc / "stat").stat().st_mtime))
         except OSError:
@@ -276,27 +277,27 @@ def _flutter_runs():
 async def flutter_hot_reload(restart: bool = False, project_dir: str = "",
                              screenshot_after: bool = True, wait: float = 1.5,
                              scale: float = 0.5) -> Image | str:
-    """Hot reload (o hot restart con restart=True) del `flutter run` que corre en una
-    terminal (le manda SIGUSR1/SIGUSR2, como las teclas r/R). Si hay varios, usa
-    `project_dir` para elegir. En VS Code no hace falta: recarga al guardar."""
+    """Hot reload (or hot restart with restart=True) the `flutter run` running in
+    a terminal (sends it SIGUSR1/SIGUSR2, like the r/R keys). If there are several,
+    use `project_dir` to pick one. Not needed in VS Code: it reloads on save."""
     runs = _flutter_runs()
     if project_dir:
         target = str(Path(project_dir).expanduser().resolve())
         runs = [r for r in runs if r[1] == target or r[1].startswith(target + "/")]
     if not runs:
-        raise RuntimeError("No encuentro un `flutter run` corriendo en una terminal (VS Code recarga al guardar).")
+        raise RuntimeError("No `flutter run` found running in a terminal (VS Code reloads on save).")
     pid, cwd, _ = max(runs, key=lambda r: r[2])
     os.kill(pid, signal.SIGUSR2 if restart else signal.SIGUSR1)
     kind = "hot restart" if restart else "hot reload"
     result = await _after(screenshot_after, wait, scale)
-    return result if screenshot_after else f"{kind} enviado a flutter run (pid {pid}, {cwd})"
+    return result if screenshot_after else f"{kind} sent to flutter run (pid {pid}, {cwd})"
 
 
 @server.tool()
 async def device_logs(seconds: float = 3.0, contains: str = "flutter", process: str = "Runner",
                       max_lines: int = 80) -> str:
-    """Lee el log del iPhone durante `seconds` segundos, filtrando por proceso y texto
-    (los print() de Flutter salen como 'flutter: …'). Útil tras reproducir un error."""
+    """Read the iPhone log for `seconds` seconds, filtered by process and text
+    (Flutter's print() shows up as 'flutter: …'). Useful after reproducing a bug."""
     lines = []
 
     async def collect():
@@ -314,7 +315,7 @@ async def device_logs(seconds: float = 3.0, contains: str = "flutter", process: 
     with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
         await asyncio.wait_for(collect(), timeout=seconds)
     lines = lines[-max_lines:]
-    return "\n".join(lines) if lines else f"(sin líneas de {process!r} con {contains!r} en {seconds} s)"
+    return "\n".join(lines) if lines else f"(no {process!r} lines containing {contains!r} in {seconds} s)"
 
 
 def main():

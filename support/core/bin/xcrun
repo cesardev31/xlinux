@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""xcrun sustituto: lo que Xcode resolvería, con LLVM y el SDK de xtool.
+"""xcrun stand-in: what Xcode would resolve, using LLVM and xtool's SDK.
 
-Lo usan herramientas que asumen macOS, p. ej. los native assets de Flutter
-(hooks de Dart con native_toolchain_c):
+Used by tools that assume macOS, e.g. Flutter native assets (Dart build hooks
+with native_toolchain_c):
   xcrun --sdk iphoneos --show-sdk-path
   xcrun --find clang
   xcrun lipo|install_name_tool|otool|strip|dsymutil|codesign ...
@@ -29,7 +29,7 @@ def find(name):
     swift = config.swift_bin()
     llvm = Path("/usr/lib/llvm-21/bin")
     tools = {
-        # clang con el linker de xtool (ver xlinux/core/toolchain.py)
+        # clang with xtool's linker (see xlinux/core/toolchain.py)
         "clang": HERE / "apple-clang", "clang++": HERE / "apple-clang++", "cc": HERE / "apple-clang",
         "c++": HERE / "apple-clang++",
         "ld": config.TOOLSET_BIN / "ld64.lld",
@@ -42,7 +42,7 @@ def find(name):
         "install_name_tool": llvm / "llvm-install-name-tool",
         "otool": llvm / "llvm-otool",
         "strip": llvm / "llvm-strip",
-        # La firma final la hace xtool sobre el .app completo (incluye frameworks).
+        # xtool signs the whole .app at the end (frameworks included).
         "codesign": HERE / "noop",
     }
     tool = tools.get(name)
@@ -79,9 +79,9 @@ def main(argv):
         elif opt in ("--run", "-r", "--log", "-l", "--verbose", "-v", "--no-cache", "-n"):
             continue
         else:
-            sys.exit(f"xcrun: error: opción no soportada {opt}")
+            sys.exit(f"xcrun: error: unsupported option {opt}")
     if not args:
-        sys.exit("xcrun: error: falta la herramienta")
+        sys.exit("xcrun: error: missing tool name")
     tool = find(args[0])
     if not tool:
         sys.exit(f"xcrun: error: unable to find utility \"{args[0]}\"")

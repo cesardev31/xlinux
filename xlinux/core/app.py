@@ -1,8 +1,7 @@
-"""Armar un .app / .ipa a partir de un proyecto de Xcode, sin Xcode.
+"""Assemble a .app / .ipa from an Xcode project, without Xcode.
 
-En Linux no existen ibtool (storyboards) ni actool (asset catalogs): el
-Info.plist se ajusta para no depender de storyboards y los íconos se copian
-como PNG sueltos.
+Linux has no ibtool (storyboards): the Info.plist is adjusted so it doesn't
+depend on storyboards, and app icons are copied as loose PNGs.
 """
 
 import json
@@ -22,7 +21,7 @@ def bundle_identifier(xcodeproj, exclude=("Tests",)):
     ids = [i.strip('"') for i in re.findall(r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);", pbx)]
     ids = [i for i in ids if not any(e in i for e in exclude)]
     if not ids:
-        sys.exit(f"error: no encontré PRODUCT_BUNDLE_IDENTIFIER en {xcodeproj.name}")
+        sys.exit(f"error: PRODUCT_BUNDLE_IDENTIFIER not found in {xcodeproj.name}")
     return ids[0]
 
 
@@ -37,7 +36,7 @@ def read_xcconfig(path):
 
 
 def expand(value, variables):
-    """Reemplaza $(VARIABLE) como lo hace Xcode al procesar el Info.plist."""
+    """Replace $(VARIABLE) the way Xcode does when processing the Info.plist."""
     if isinstance(value, str):
         return re.sub(r"\$\(([A-Z_]+)\)", lambda m: variables.get(m.group(1), ""), value)
     if isinstance(value, list):
@@ -48,10 +47,10 @@ def expand(value, variables):
 
 
 def info_plist(source, variables, scene_delegate=None):
-    """Info.plist listo para un .app compilado sin ibtool.
+    """Info.plist ready for a .app built without ibtool.
 
-    scene_delegate: clase (Módulo.Clase) que crea la ventana por código y
-    reemplaza al storyboard principal."""
+    scene_delegate: class (Module.Class) that creates the window in code,
+    replacing the main storyboard."""
     with open(source, "rb") as f:
         info = expand(plistlib.load(f), variables)
     info.pop("UIMainStoryboardFile", None)
@@ -75,7 +74,7 @@ def info_plist(source, variables, scene_delegate=None):
 
 
 def add_icons(iconset, app, info):
-    """Íconos sin actool: PNG sueltos + CFBundleIcons (formato previo a Assets.car)."""
+    """App icons without actool: loose PNGs + CFBundleIcons (the pre-Assets.car format)."""
     contents = iconset / "Contents.json"
     if not contents.exists():
         return
@@ -94,8 +93,8 @@ def add_icons(iconset, app, info):
         info["CFBundleIcons~ipad"] = info["CFBundleIcons"]
 
 
-# Archivos que Xcode copia tal cual al .app (fase "Copy Bundle Resources"):
-# GoogleService-Info.plist de Firebase, manifiestos de privacidad, fuentes...
+# Files Xcode copies as-is into the .app ("Copy Bundle Resources" phase):
+# Firebase's GoogleService-Info.plist, privacy manifests, fonts...
 RESOURCE_SUFFIXES = {".plist", ".json", ".xcprivacy", ".png", ".jpg", ".ttf", ".otf",
                      ".strings", ".mp3", ".wav", ".caf"}
 
@@ -113,7 +112,7 @@ def write_info_plist(app, info):
 
 
 def package_ipa(app, ipa):
-    log(f"Empaquetando {ipa.name}")
+    log(f"Packaging {ipa.name}")
     with zipfile.ZipFile(ipa, "w", zipfile.ZIP_DEFLATED) as z:
         for path in sorted(app.rglob("*")):
             if path.is_dir():

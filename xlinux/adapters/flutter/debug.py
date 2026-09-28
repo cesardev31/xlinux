@@ -1,6 +1,6 @@
-"""Debug de Flutter: el JIT de Dart en iOS necesita lldb adjunto (helper
-NOTIFY_DEBUGGER_ABOUT_RX_PAGES) y la herramienta `flutter` necesita la URL del
-Dart VM Service, que se reenvía por USB al mismo puerto local."""
+"""Flutter debug: Dart's JIT on iOS needs lldb attached (the
+NOTIFY_DEBUGGER_ABOUT_RX_PAGES helper), and the `flutter` tool needs the Dart
+VM Service URL, which is forwarded over USB to the same local port."""
 
 import shlex
 
@@ -8,12 +8,12 @@ from ...core import config, device
 from ...core.device import DebugSession
 
 JIT_HELPER = config.SUPPORT / "flutter/flutter_lldb_helper.py"
-# Opciones del engine que decidimos nosotros (el VM Service se reenvía por USB).
+# Engine options we decide ourselves (the VM Service is forwarded over USB).
 _RESERVED = ("--vm-service-port", "--vm-service-host", "--observatory-port")
 
 
 def run_debug(project, engine_options, udid):
-    """Lanza en debug e imprime la línea que buscan `flutter run` / `flutter attach`."""
+    """Launch in debug mode and print the line `flutter run` / `flutter attach` look for."""
     if isinstance(engine_options, str):
         engine_options = shlex.split(engine_options)
     vm_port = device.free_port()

@@ -2,21 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found at https://github.com/flutter/flutter/blob/master/LICENSE
 #
-# Basado en flutter_lldb_helper.py, que Flutter genera en ios/Flutter/ephemeral/
-# (el proyecto puede no tenerlo si nunca se generó en macOS).
-# Modificado por xlinux: toca 8 bytes por página en vez de escribir la región
-# completa (mucho más rápido por el protocolo del debugger) y estadísticas
-# opcionales (XLINUX_JIT_STATS).
+# Based on the flutter_lldb_helper.py Flutter generates in ios/Flutter/ephemeral/
+# (a project may not have it if it was never built on macOS).
+# Modified by xlinux: touches 8 bytes per page instead of writing the whole
+# region (much faster over the debugger protocol), plus optional statistics
+# (XLINUX_JIT_STATS).
 #
 import os
 import time
 
 import lldb
 
-# xlinux: estadísticas opcionales (XLINUX_JIT_STATS=1) para medir el
-# costo de las paradas del JIT.
+# xlinux: optional statistics (XLINUX_JIT_STATS=1) to measure the cost of
+# the JIT stops.
 _stats = {"hits": 0, "bytes": 0, "start": time.time(), "last": 0.0}
-# Tamaño de página de iOS arm64 (debugserver reporta vm-page-size:16384).
+# iOS arm64 page size (debugserver reports vm-page-size:16384).
 PAGE_SIZE = int(os.environ.get("XLINUX_JIT_PAGE_SIZE", "16384"))
 
 def handle_new_rx_page(frame: lldb.SBFrame, bp_loc, extra_args, intern_dict):
@@ -33,12 +33,12 @@ def handle_new_rx_page(frame: lldb.SBFrame, bp_loc, extra_args, intern_dict):
         now = time.time()
         if now - _stats["last"] > 5:
             _stats["last"] = now
-            print(f"[jit] {_stats['hits']} paradas, {_stats['bytes'] // 1024} KiB escritos, "
+            print(f"[jit] {_stats['hits']} stops, {_stats['bytes'] // 1024} KiB written, "
                   f"{now - _stats['start']:.0f} s", flush=True)
     process = frame.GetThread().GetProcess()
     error = lldb.SBError()
     if os.environ.get("XLINUX_JIT_FULL_WRITE"):
-        # Comportamiento original de Flutter: escribir la región completa.
+        # Flutter's original behavior: write the whole region.
         data = bytearray(page_len)
         data[0:8] = b'IHELPED!'
         process.WriteMemory(base, data, error)
@@ -46,11 +46,11 @@ def handle_new_rx_page(frame: lldb.SBFrame, bp_loc, extra_args, intern_dict):
             print(f'Failed to write into {base}[+{page_len}]', error)
         return
 
-    # xlinux: lo que importa es que el debugger "toque" cada página
-    # (el kernel la marca como escrita por el debugger). Las páginas son nuevas
-    # y valen cero, así que escribir 8 bytes al inicio de cada una deja la misma
-    # memoria que escribir la región completa, con ~2000x menos datos por el
-    # protocolo del debugger (cada parada escribía hasta 512 KiB).
+    # xlinux: what matters is that the debugger "touches" every page (the
+    # kernel marks it as written by the debugger). The pages are fresh and
+    # zeroed, so writing 8 bytes at the start of each one leaves the same memory
+    # as writing the whole region, with ~2000x less data over the debugger
+    # protocol (each stop used to write up to 512 KiB).
     page = PAGE_SIZE
     for offset in range(0, page_len, page):
         chunk = b'IHELPED!' if offset == 0 else bytes(8)

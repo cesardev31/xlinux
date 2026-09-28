@@ -1,4 +1,4 @@
-"""Adaptador Flutter."""
+"""Flutter adapter."""
 
 from . import custom_device
 
@@ -11,7 +11,7 @@ def setup():
 
 def doctor_checks(which):
     return [
-        (bool(which("flutter")), "flutter", "instala Flutter y agrégalo al PATH"),
-        (custom_device.is_registered(), "custom device para VS Code / flutter run",
-         "corre `xlinux setup`"),
+        (bool(which("flutter")), "flutter", "install Flutter and add it to PATH"),
+        (custom_device.is_registered(), "custom device for VS Code / flutter run",
+         "run `xlinux setup`"),
     ]

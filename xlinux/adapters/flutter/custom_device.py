@@ -1,13 +1,13 @@
-"""Registra el iPhone como "custom device" de Flutter.
+"""Register the iPhone as a Flutter "custom device".
 
-Así aparece en `flutter devices`, en el selector de dispositivos de VS Code y
-funciona con `flutter run -d iphone-linux` (hot reload incluido). Flutter
-llama a los comandos `device ...` de esta herramienta.
+It then shows up in `flutter devices` and in VS Code's device picker, and
+`flutter run -d iphone-linux` works (hot reload included). Flutter calls this
+tool's `device ...` commands.
 
-Limitación de Flutter: un custom device solo puede declararse linux-x64 o
-linux-arm64. El bundle que compila `flutter` se ignora (instalamos nuestro
-propio build de iOS), pero el registrante de plugins Dart que envía un hot
-restart es el de Linux.
+Flutter only allows custom devices to be declared as linux-x64 or
+linux-arm64. The bundle `flutter` builds for that platform is ignored (we
+install our own iOS build). The Dart plugin registrant is not affected: it
+covers every platform and picks one at runtime with `Platform.isIOS`.
 """
 
 import json
@@ -26,20 +26,20 @@ def device_config():
     return {
         "id": DEVICE_ID,
         "label": "iPhone (xlinux)",
-        "sdkNameAndVersion": "iOS vía xlinux",
+        "sdkNameAndVersion": "iOS via xlinux",
         "platform": "linux-x64",
         "enabled": True,
         "ping": [cli, "device", "ping"],
         "pingSuccessRegex": None,
         "postBuild": None,
         "install": [cli, "device", "install"],
-        # No desinstalar: al borrar la última app firmada, iOS olvida la
-        # confianza en el desarrollador y hay que volver a aprobarla a mano.
+        # Never uninstall: once the last app signed by an Apple ID is removed,
+        # iOS forgets the developer trust and it has to be re-approved by hand.
         "uninstall": [cli, "device", "uninstall"],
         "runDebug": [cli, "device", "run-debug", "--engine-options=${engineOptions}"],
         "forwardPort": None,
         "forwardPortSuccessRegex": None,
-        # Flutter espera que el comando escriba el PNG codificado en base64.
+        # Flutter expects the command to print the PNG encoded as base64.
         "screenshot": [cli, "device", "screenshot", "--base64"],
     }
 
@@ -63,4 +63,4 @@ def register():
     data["custom-devices"] = devices
     FLUTTER_CUSTOM_DEVICES.parent.mkdir(parents=True, exist_ok=True)
     FLUTTER_CUSTOM_DEVICES.write_text(json.dumps(data, indent=2) + "\n")
-    log(f"iPhone registrado como custom device '{DEVICE_ID}' en {FLUTTER_CUSTOM_DEVICES}")
+    log(f"iPhone registered as custom device '{DEVICE_ID}' in {FLUTTER_CUSTOM_DEVICES}")

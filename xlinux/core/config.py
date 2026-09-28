@@ -1,10 +1,10 @@
-"""Rutas y entorno.
+"""Paths and environment.
 
-El código vive en este repo; todo lo pesado (toolchain Swift, SDK de iOS,
-Darling, pymobiledevice3, artefactos de cada framework) vive en el directorio
-de datos, normalmente un SSD externo. Los comandos se pueden invocar desde
-VS Code o desde la herramienta de un framework (p. ej. los custom devices de
-Flutter), que no cargan ningún `env.sh`, así que el entorno se arma aquí.
+The code lives in this repo; everything heavy (Swift toolchain, iOS SDK,
+Darling, pymobiledevice3, each framework's artifacts) lives in the data
+directory, e.g. an external SSD. Commands can be invoked from VS Code or from
+a framework's own tool (e.g. Flutter custom devices), which don't source any
+`env.sh`, so the environment is assembled here.
 """
 
 import json
@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent.parent
 SUPPORT = REPO / "support"
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "xlinux/config.json"
-DEFAULT_DATA_DIR = "/run/media/cesar/games/ios-dev"
+DEFAULT_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "xlinux"
 
 MIN_IOS = "15.0"
 XTOOL_SDK = Path.home() / ".swiftpm/swift-sdks/darwin.artifactbundle"
@@ -25,7 +25,7 @@ SWIFT_RESOURCES = XTOOL_SDK / "Developer/Toolchains/XcodeDefault.xctoolchain/usr
 TOOLSET_BIN = XTOOL_SDK / "toolset/bin"
 
 
-# Nombre anterior del proyecto: se sigue leyendo su configuración si no hay una nueva.
+# The project's previous name: its config is still read if there is no new one.
 LEGACY_CONFIG_FILE = CONFIG_FILE.parent.parent / "flutter-ios-linux/config.json"
 
 
@@ -50,7 +50,7 @@ def data_dir():
 def require_data_dir():
     data = data_dir()
     if not (data / "swiftly").is_dir():
-        sys.exit(f"error: no encuentro el directorio de datos en {data}. ¿Está montado el SSD?")
+        sys.exit(f"error: data directory not found at {data} (is the drive mounted? see `xlinux setup --data-dir`)")
     return data
 
 
@@ -68,12 +68,12 @@ def compat_shim():
 
 
 def tool_env():
-    """Entorno con Swift, xtool, Darling y pymobiledevice3 disponibles."""
+    """Environment with Swift, xtool, Darling and pymobiledevice3 available."""
     data = data_dir()
     env = os.environ.copy()
-    # <datos>/bin primero: trae xtool extraído del AppImage, que sí funciona
-    # sin FUSE (el AppImage falla cuando lo lanza el snap de Flutter).
-    # support/core/bin: xcrun sustituto (lo piden p. ej. los native assets de Flutter).
+    # support/core/bin: our xcrun/actool/clang stand-ins (e.g. Flutter native assets need xcrun).
+    # <data>/bin: xtool extracted from its AppImage, which works without FUSE
+    # (the AppImage fails when launched from the Flutter snap).
     path = [str(SUPPORT / "core/bin"), str(data / "bin"), str(Path.home() / ".local/bin")]
     if swift_bin():
         path.insert(0, str(swift_bin()))

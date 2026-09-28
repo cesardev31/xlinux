@@ -1,11 +1,11 @@
-// Parches para correr el gen_snapshot de Flutter (binario macOS) en Darling.
-// Se inyecta con DYLD_INSERT_LIBRARIES desde bin/gen_snapshot_ios.
+// Patches to run Flutter's gen_snapshot (a macOS binary) under Darling.
+// Injected with DYLD_INSERT_LIBRARIES by xlinux/core/darling.py.
 //
-// 1. uname(): Darling se presenta como Darwin 20 (macOS 11) y el Dart VM
-//    exige macOS 12+. Reportamos Darwin 21.
-// 2. vm_map()/mach_vm_map(): Dart reserva páginas del heap alineadas (mask != 0).
-//    Darling no implementa esa variante y devuelve error, Dart se queda sin
-//    memoria y el GC se estrella. La emulamos con mmap + recorte.
+// 1. uname(): Darling reports Darwin 20 (macOS 11) and the Dart VM requires
+//    macOS 12+. We report Darwin 21.
+// 2. vm_map()/mach_vm_map(): Dart reserves aligned heap pages (mask != 0).
+//    Darling doesn't implement that variant and returns an error, Dart runs
+//    out of memory and the GC crashes. We emulate it with mmap + trimming.
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <stdint.h>

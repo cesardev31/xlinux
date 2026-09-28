@@ -1,288 +1,298 @@
 # xlinux
 
-Compila, instala y depura apps en un iPhone real **desde Linux, sin Mac**.
+Build, install and debug apps on a real iPhone **from Linux, no Mac required**.
 
-Hoy soporta **Flutter**: release, debug con hot reload, el iPhone como dispositivo
-en VS Code / `flutter run`, y plugins nativos reales (Firebase, Stripe, Google
-Sign-In, WebView…). El núcleo es agnóstico al framework, así que se pueden
-agregar otros adaptadores (el siguiente candidato es Expo / React Native).
+Today it supports **Flutter**: release builds, debug with hot reload, the
+iPhone as a device in VS Code / `flutter run`, and real native plugins
+(Firebase, Stripe, Google Sign-In, WebView…). The core is framework-agnostic,
+so more adapters can be added (Expo / React Native is the next candidate).
 
-No reimplementa Xcode. Junta piezas de código abierto que ya existían (xtool,
-Darling, pymobiledevice3, LLVM/Swift, OpenAppleMacros…) y tapa los huecos donde
-no encajaban. Los créditos están [al final](#créditos-y-licencias).
+It does not reimplement Xcode. It glues together open-source pieces that
+already existed (xtool, Darling, pymobiledevice3, LLVM/Swift, OpenAppleMacros…)
+and fills the gaps where they didn't fit. Credits are [at the end](#credits-and-licenses).
 
 ```
-flutter run -d iphone-linux        # debug + hot reload (o elige el iPhone en VS Code)
-xlinux run                         # release: compila, instala, abre y muestra logs
+flutter run -d iphone-linux        # debug + hot reload (or pick the iPhone in VS Code)
+xlinux run                         # release: build, install, launch and stream logs
 xlinux build [--debug] [--install] [--project DIR]
-xlinux doctor                      # diagnóstico
-xlinux mcp                         # servidor MCP para agentes (ver abajo)
-xlinux setup                       # preparar el entorno (una vez)
+xlinux doctor                      # diagnostics
+xlinux setup                       # prepare the environment (once)
+xlinux mcp                         # MCP server for AI agents (see below)
 xlinux device screenshot iphone.png
-xlinux device mirror               # visor web en 127.0.0.1:8080
-xlinux device mirror --mode vnc    # VNC con control táctil
+xlinux device mirror               # web viewer at 127.0.0.1:8080
+xlinux device mirror --mode vnc    # VNC with touch control
 ```
 
-`flutter-ios-linux` (el nombre anterior) sigue funcionando como alias.
+`flutter-ios-linux` (the previous name) still works as an alias.
 
-## Estado
+## Status
 
-Probado en un iPhone 11 con iOS 27.2 y una cuenta de Apple **gratuita**, con una
-app Flutter real en producción (Volaré).
+Tested on an iPhone 11 running iOS 27.2 with a **free** Apple ID, against real
+production Flutter apps.
 
 | | |
 |---|---|
-| Release (Dart AOT) compila, instala y abre rápido | ✅ |
-| Debug con JIT + lldb (sin sudo; más rápido con `tunneld`) | ✅ |
-| Hot reload (`flutter run` y protocolo de VS Code), ~0,5 s | ✅ |
-| iPhone visible en `flutter devices` / VS Code | ✅ |
-| Native assets (hooks de Dart, p. ej. `objective_c`) en debug y release | ✅ |
-| Plugins nativos por SwiftPM: firebase_core, google_sign_in (login con Google), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
-| Plugins solo con CocoaPods (conversión podspec → SwiftPM, sin Ruby): pods en Swift + xcframeworks, p. ej. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ compila |
-| Pods con Objective-C/C | ❌ |
-| Otros frameworks (Expo / React Native) | 🔜 |
+| Release (Dart AOT) builds, installs and launches fast | ✅ |
+| Debug with JIT + lldb (no sudo; faster with `tunneld`) | ✅ |
+| Hot reload (`flutter run` and the VS Code protocol), ~0.5 s | ✅ |
+| iPhone listed in `flutter devices` / VS Code | ✅ |
+| Native assets (Dart build hooks, e.g. `objective_c`) in debug and release | ✅ |
+| Native plugins via SwiftPM: firebase_core, google_sign_in (Google login), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
+| CocoaPods-only plugins (podspec → SwiftPM conversion, no Ruby): Swift pods + xcframeworks, e.g. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ |
+| Pods with Objective-C/C | ❌ |
+| Other frameworks (Expo / React Native) | 🔜 |
 
-## Cómo funciona
+## How it works
 
-| En macOS lo hace… | Aquí |
+| On macOS this is done by… | Here |
 |---|---|
-| `gen_snapshot` (Dart AOT → ARM64) | el binario de macOS de Flutter corriendo en **Darling**, con `support/core/darling_compat.c` (finge macOS 12 en `uname` y emula `vm_map` alineado, que Darling no soporta y tumbaba el GC de Dart) |
-| Xcode compila Runner (Swift/ObjC) | `swiftc`/`clang` + SDK de iOS extraído de `Xcode.xip` por **xtool** |
-| CocoaPods (`pod install`) | `xlinux/core/cocoapods.py`: lee podspecs (Ruby mínimo para los locales, JSON del CDN para los de terceros), resuelve versiones, baja el código sin historial y genera un `Package.swift` por pod; los `resource_bundles` se arman como CocoaPods (actool incluido) |
-| Xcode + SwiftPM compilan plugins | **Swift Build** (SwiftPM 6.4) con el toolset de xtool; se genera el mismo `FlutterGeneratedPluginSwiftPackage` que en macOS y el Runner como ejecutable SwiftPM |
-| `xcrun`, `clang`, `lipo`, `otool`, `install_name_tool`, `codesign` | `support/core/bin/`: xcrun propio, clang que deduce `-target` como el de Apple, herramientas de LLVM, codesign no-op (firma xtool al final) |
-| `actool` (asset catalogs → `Assets.car`) | `support/core/bin/actool`: imagesets a PNG sueltos (`nombre@2x.png`), SVG/PDF rasterizados (cairosvg / pdftocairo), AppIcon → `CFBundleIcons` |
-| `ibtool` (`Main.storyboard`) | `support/flutter/FlutterLinuxSceneDelegate.swift` crea la ventana por código; `UILaunchScreen` en Info.plist |
-| macros de Xcode (`#Preview`, `@Observable`…) | **OpenAppleMacros** de xtool, con stubs para `#Preview` de UIKit (`support/patches/`) |
-| `flutter build ios` / `flutter assemble` | `flutter assemble` con los mismos `-d` que Xcode; en release, `gen_snapshot_arm64` de la caché de Flutter es un envoltorio que lo corre en Darling |
-| firmar e instalar | **xtool** (Apple ID gratis o de pago) |
-| debug (el JIT de Dart necesita debugger) | **pymobiledevice3** (túnel de kernel `tunneld` o userspace sin sudo) + `support/core/device_bridge.py` + lldb con `support/core/lldb_driver.py` y el helper JIT de Flutter |
-| dispositivo en VS Code | *custom device* de Flutter (`xlinux/adapters/flutter/custom_device.py`) |
+| `gen_snapshot` (Dart AOT → ARM64) | Flutter's macOS binary running under **Darling**, with `support/core/darling_compat.c` (reports macOS 12 from `uname` and emulates aligned `vm_map`, which Darling lacks and which crashed Dart's GC) |
+| Xcode compiling Runner (Swift/ObjC) | `swiftc`/`clang` + the iOS SDK extracted from `Xcode.xip` by **xtool** |
+| CocoaPods (`pod install`) | `xlinux/core/cocoapods.py`: reads podspecs (a minimal Ruby reader for local ones, CDN JSON for third-party ones), resolves versions, fetches sources without history and generates one `Package.swift` per pod; `resource_bundles` are assembled like CocoaPods does (actool included) |
+| Xcode + SwiftPM building plugins | **Swift Build** (SwiftPM 6.4) with xtool's toolset; generates the same `FlutterGeneratedPluginSwiftPackage` as macOS, with the Runner as a SwiftPM executable |
+| `xcrun`, `clang`, `lipo`, `otool`, `install_name_tool`, `codesign` | `support/core/bin/`: our own xcrun, a clang that infers `-target` like Apple's, LLVM tools, a no-op codesign (xtool signs at the end) |
+| `actool` (asset catalogs → `Assets.car`) | `support/core/bin/actool`: imagesets to loose PNGs (`name@2x.png`), rasterized SVG/PDF (cairosvg / pdftocairo), AppIcon → `CFBundleIcons` |
+| `ibtool` (`Main.storyboard`) | `support/flutter/FlutterLinuxSceneDelegate.swift` creates the window in code; `UILaunchScreen` in Info.plist |
+| Xcode macros (`#Preview`, `@Observable`…) | xtool's **OpenAppleMacros**, with stubs for UIKit `#Preview` (`support/patches/`) |
+| `flutter build ios` / `flutter assemble` | `flutter assemble` with the same `-d` defines Xcode passes; in release, `gen_snapshot_arm64` in Flutter's cache is a wrapper that runs it under Darling |
+| signing and installing | **xtool** (free or paid Apple ID) |
+| debugging (Dart's JIT needs a debugger) | **pymobiledevice3** (kernel `tunneld` tunnel, or userspace without sudo) + `support/core/device_bridge.py` + lldb with `support/core/lldb_driver.py` and Flutter's JIT helper |
+| the device in VS Code | a Flutter *custom device* (`xlinux/adapters/flutter/custom_device.py`) |
 
-## Arquitectura
+## Architecture
 
 ```
-xlinux/core/               agnóstico al framework
-  toolchain.py             swiftc/clang/Swift Build para iOS, mirrors git sin historial
-  cocoapods.py             podspec → SwiftPM (sin Ruby ni `pod install`)
-xlinux/mcp_server.py       servidor MCP (captura, toques, texto, botones, apps, hot reload, logs)
-  app.py                   .app/.ipa sin ibtool/actool (Info.plist, íconos, recursos)
-  darling.py               correr herramientas CLI de macOS
-  device.py                detectar, instalar, lanzar, capturar; DebugSession (DVT + debugserver + lldb)
-  setup.py                 setup/doctor comunes
-  config.py                rutas y entorno (funciona sin cargar ningún env.sh)
-xlinux/adapters/flutter/   todo lo específico de Flutter
+xlinux/core/               framework-agnostic
+  toolchain.py             swiftc/clang/Swift Build for iOS, history-less git mirrors
+  cocoapods.py             podspec → SwiftPM (no Ruby, no `pod install`)
+  app.py                   .app/.ipa without ibtool (Info.plist, icons, resources)
+  darling.py               run macOS command-line tools
+  device.py                detect, install, launch, capture; DebugSession (DVT + debugserver + lldb)
+  setup.py                 shared setup/doctor
+  config.py                paths and environment (works without sourcing any env.sh)
+xlinux/adapters/flutter/   everything Flutter-specific
   build.py                 flutter assemble, Runner, .app
-  plugins.py               plugins nativos vía SwiftPM (como `flutter build ios` en macOS)
-  debug.py                 helper JIT + VM Service para `flutter run`/`attach`
-  custom_device.py         el iPhone en `flutter devices` y VS Code
+  plugins.py               native plugins via SwiftPM (like `flutter build ios` on macOS)
+  debug.py                 JIT helper + VM Service for `flutter run`/`attach`
+  custom_device.py         the iPhone in `flutter devices` and VS Code
+xlinux/mcp_server.py       MCP server (screenshots, touches, text, buttons, apps, hot reload, logs)
 support/core/              device_bridge.py, lldb_driver.py, darling_compat.c
 support/core/bin/          xcrun, actool, apple-clang, lipo, otool, install_name_tool, codesign
 support/flutter/           FlutterLinuxSceneDelegate.swift, flutter_lldb_helper.py
-support/patches/           parches a proyectos de terceros (OpenAppleMacros)
-tools/bench_debug.py       mide arranque y hot reload como lo usa VS Code
+support/patches/           patches to third-party projects (OpenAppleMacros)
+tools/bench_debug.py       measures startup and hot reload the way VS Code drives them
 ```
 
-Un adaptador nuevo aporta su build y su forma de depurar. Firma, instalación,
-dispositivo, Swift Build, `xcrun`/`actool` y empaquetado vienen del core.
+A new adapter provides its build and its debugging story. Signing,
+installing, the device, Swift Build, `xcrun`/`actool` and packaging come from
+the core.
 
-## Instalación
+## Installation
 
-Lo pesado (≈40 GB con dependencias de SwiftPM) va en un **directorio de datos**,
-por ejemplo un SSD externo:
+The heavy parts (≈40 GB including SwiftPM dependencies) live in a **data
+directory** (default `~/.local/share/xlinux`; an external SSD works well):
 
-| Qué | Cómo |
+| What | How |
 |---|---|
-| Swift 6.4 | [swiftly](https://github.com/swiftlang/swiftly) con `SWIFTLY_HOME_DIR` en el directorio de datos |
-| xtool | AppImage en `~/.local/bin/xtool`; `xtool setup` con `Xcode_27.xip` (lo descargas tú con tu Apple ID) |
-| Darling | `.deb` de `darling-core`, `darling-system`, `darling-cli` |
-| pymobiledevice3 | `UV_TOOL_DIR=<datos>/uv-tools uv tool install pymobiledevice3` |
-| MCP SDK + Pillow (para `xlinux mcp`) | `uv pip install --python <datos>/uv-tools/pymobiledevice3/bin/python mcp pillow` |
-| cairosvg (para `actool`) | `uv venv <datos>/py-tools && uv pip install --python <datos>/py-tools/bin/python cairosvg` |
-| LLVM del sistema | `llvm-lipo`, `llvm-otool`, `llvm-install-name-tool` (paquete `llvm-21`) y `pdftocairo` (poppler) |
-| OpenAppleMacros con `#Preview` de UIKit | ver `support/patches/README.md` (solo si algún plugin usa `#Preview` de UIKit, p. ej. Stripe) |
-| engine de Flutter para iOS | se descarga solo en la primera compilación |
+| Swift 6.4 | [swiftly](https://github.com/swiftlang/swiftly) with `SWIFTLY_HOME_DIR` inside the data directory |
+| xtool | AppImage at `~/.local/bin/xtool`; `xtool setup` with `Xcode_27.xip` (downloaded by you with your Apple ID) |
+| Darling | the `darling-core`, `darling-system`, `darling-cli` `.deb` packages |
+| pymobiledevice3 | `UV_TOOL_DIR=<data>/uv-tools uv tool install pymobiledevice3` |
+| MCP SDK + Pillow (for `xlinux mcp`) | `uv pip install --python <data>/uv-tools/pymobiledevice3/bin/python mcp pillow` |
+| cairosvg (for `actool`) | `uv venv <data>/py-tools && uv pip install --python <data>/py-tools/bin/python cairosvg` |
+| System LLVM | `llvm-lipo`, `llvm-otool`, `llvm-install-name-tool` (the `llvm-21` package) and `pdftocairo` (poppler) |
+| OpenAppleMacros with UIKit `#Preview` | see `support/patches/README.md` (only needed if a plugin uses UIKit `#Preview`, e.g. Stripe) |
+| Flutter's iOS engine | downloaded automatically on the first build |
 
 ```
-bin/xlinux setup --data-dir /ruta/al/directorio-de-datos
+bin/xlinux setup --data-dir /path/to/data-directory
 bin/xlinux doctor
 ```
 
-`setup` extrae el AppImage de xtool (así funciona sin FUSE desde el snap de
-Flutter), compila el shim de Darling, instala el servidor de macros parchado si
-existe y registra el iPhone en `~/.config/flutter/custom_devices.json`.
+`setup` extracts xtool's AppImage (so it works without FUSE from the Flutter
+snap), builds the Darling shim, installs the patched macro server if present
+and registers the iPhone in `~/.config/flutter/custom_devices.json`.
 
-Recomendado para depurar (debug mucho más rápido), en otra terminal:
+Recommended for debugging (much faster), in another terminal:
 
 ```
-sudo <datos>/uv-tools/pymobiledevice3/bin/pymobiledevice3 remote tunneld
+sudo <data>/uv-tools/pymobiledevice3/bin/pymobiledevice3 remote tunneld
 ```
 
-En el iPhone: modo desarrollador activado y confiar en tu Apple ID (Ajustes →
-General → VPN y gestión de dispositivos).
+On the iPhone: enable Developer Mode and trust your Apple ID (Settings →
+General → VPN & Device Management).
 
-## Ver y controlar el iPhone
+## Seeing and controlling the iPhone
 
-`device screenshot` captura la pantalla completa mediante CoreDevice. También
-queda registrado en el custom device, así que `flutter screenshot -d
-iphone-linux` puede guardar una captura directamente. `device mirror` transmite
-la pantalla mediante el túnel userspace de pymobiledevice3, sin sudo. El modo
-web ofrece un visor en el navegador; el modo VNC acepta clics y los convierte en
-eventos táctiles HID.
+`device screenshot` captures the full screen through CoreDevice. It's also
+registered with the custom device, so `flutter screenshot -d iphone-linux`
+works too. `device mirror` streams the screen through pymobiledevice3 (over
+`tunneld` if running, otherwise the userspace tunnel, no sudo). Web mode offers
+a browser viewer; VNC mode turns clicks into HID touch events and decodes the
+video on your machine, so it works with any VNC viewer (e.g. Remmina).
 
-Para agentes hay una interfaz sin UI que escribe una respuesta JSON por acción.
-Las coordenadas están normalizadas entre `0` y `1`, independientemente del modelo
-de iPhone:
+For scripts there is a headless interface that prints one JSON response per
+action. Coordinates are normalized between `0` and `1`, regardless of the
+iPhone model:
 
 ```bash
 xlinux device agent snapshot
 # {"ok": true, "path": "/tmp/xlinux/screen.png", "width": ..., "height": ...}
 xlinux device agent tap 0.5 0.8
 xlinux device agent swipe 0.5 0.8 0.5 0.2 --duration 0.4
-xlinux device agent type "texto"
+xlinux device agent type "text"
 xlinux device agent button home
 ```
 
-Esto permite automatizar el ciclo `editar → hot reload → snapshot → inspección
-visual → interacción → snapshot` desde cualquier agente con acceso al shell.
-
-## MCP: que un agente vea y maneje el iPhone
+## MCP: let an AI agent see and drive the iPhone
 
 ```
-claude mcp add xlinux -- xlinux mcp      # Claude Code (o el equivalente en tu agente)
+claude mcp add xlinux -- xlinux mcp      # Claude Code (or your agent's equivalent)
 ```
 
-`xlinux mcp` es un servidor MCP (stdio) que mantiene abiertos el túnel y la sesión de
-toque de CoreDevice: una captura tarda ~0,3 s (con la CLI eran ~3 s) y pesa ~25 KB.
+`xlinux mcp` is an MCP server (stdio) that keeps the tunnel and the CoreDevice
+touch session open: a screenshot takes ~0.3 s (vs ~3 s through the CLI) and
+weighs ~25 KB.
 
-| Herramienta | Qué hace |
+| Tool | What it does |
 |---|---|
-| `screenshot` | captura (JPEG reducido) |
-| `tap`, `swipe` | tocar / arrastrar con coordenadas 0..1; devuelven la captura de después |
-| `type_text` | escribir ASCII en el campo con foco |
+| `screenshot` | capture the screen (downscaled JPEG) |
+| `tap`, `swipe` | touch / drag with 0..1 coordinates; return the screenshot afterwards |
+| `type_text` | type ASCII into the focused field |
 | `press_button` | home, lock, volume-up, volume-down, mute |
-| `list_apps`, `launch_app` | apps instaladas (acepta el bundle ID sin el prefijo `XTL-`) |
-| `flutter_hot_reload` | r/R del `flutter run` que corre en una terminal (SIGUSR1/SIGUSR2) |
-| `device_logs` | log del iPhone filtrado (los `print()` de Flutter) |
+| `list_apps`, `launch_app` | installed apps (accepts the bundle ID without the `XTL-` prefix) |
+| `flutter_hot_reload` | r/R of the `flutter run` running in a terminal (SIGUSR1/SIGUSR2) |
+| `device_logs` | filtered iPhone log (Flutter's `print()` output) |
 
-Así un agente puede cerrar el ciclo solo: editar código → hot reload → captura →
-tocar/navegar → verificar. Úsalo con apps de desarrollo: el agente puede tocar
-cualquier cosa del teléfono.
+An agent can close the loop by itself: edit code → hot reload → screenshot →
+tap/navigate → verify. Use it with apps under development: the agent can touch
+anything on the phone.
 
-## Detalles que costaron (para no redescubrirlos)
+## Hard-won details (so nobody has to rediscover them)
 
-**Debug**
-- iOS 17+: `debugserver` no puede lanzar apps ("Operation not permitted"). Se lanzan
-  **suspendidas por DVT** y lldb se adjunta al pid. La sesión DVT tiene que seguir
-  abierta hasta que lldb se adjunte; si no, Flutter arranca sin debugger ("debug mode
-  Flutter apps can only be launched from Flutter tooling").
-- El `debugproxy` de iOS 17+ espera TCP crudo; el reenviador de pymobiledevice3 hace
-  check-in de lockdown y lldb se cuelga.
-- lldb en modo **síncrono** tras adjuntarse: en asíncrono los callbacks del breakpoint
-  `NOTIFY_DEBUGGER_ABOUT_RX_PAGES` no corren y la app queda en negro.
-- El helper JIT de Flutter escribe la región completa (hasta 512 KiB por parada) por el
-  protocolo del debugger; basta con tocar 8 bytes por página de 16 KiB (las páginas son
-  nuevas y valen cero): el primer hot reload bajó de 6,8 s a ~0,5 s.
-- Túnel de kernel (`tunneld`): si está corriendo, lldb habla directo con debugserver; el
-  túnel userspace (TCP en Python) funciona sin sudo pero a veces se atasca minutos.
-- Una app de debug que queda sin debugger se congela en la siguiente parada del JIT y
-  traba al instalador de iOS: antes de instalar se cierran sus instancias (DVT kill).
-- Registro de plugins Dart: aunque Flutter crea que el iPhone es "linux", el
-  `dart_plugin_registrant.dart` incluye todas las plataformas y elige con
-  `Platform.isIOS` en tiempo de ejecución: hot restart funciona con plugins.
-- Caché: si el código nativo generado, los plugins, el engine y las herramientas no
-  cambian, se salta `swift build` (~30 s en Volaré aun sin cambios); si el `.app` es
-  idéntico al instalado en ese iPhone (registro por iPhone y app), no se reinstala.
-  El `.app` se instala sin comprimir.
-- `target.memory-module-load-level minimal`: sin la caché compartida extraída
-  (DeviceSupport de Xcode) lldb leería ~500 librerías desde la memoria del iPhone.
+**Debugging**
+- iOS 17+: `debugserver` can't launch apps ("Operation not permitted"). Apps are
+  **launched suspended through DVT** and lldb attaches to the pid. The DVT
+  session has to stay open until lldb attaches; otherwise Flutter starts
+  without a debugger ("debug mode Flutter apps can only be launched from
+  Flutter tooling").
+- iOS 17+'s `debugproxy` expects raw TCP; pymobiledevice3's forwarder performs
+  the lockdown check-in and lldb hangs.
+- lldb must run in **synchronous** mode after attaching: in async mode the
+  `NOTIFY_DEBUGGER_ABOUT_RX_PAGES` breakpoint callbacks never run and the app
+  shows a black screen.
+- Flutter's JIT helper writes the whole region (up to 512 KiB per stop) over the
+  debugger protocol; touching 8 bytes per 16 KiB page is enough (the pages are
+  fresh and zeroed): the first hot reload went from 6.8 s to ~0.5 s.
+- Kernel tunnel (`tunneld`): when running, lldb talks straight to debugserver;
+  the userspace tunnel (TCP in Python) works without sudo but sometimes stalls
+  for minutes.
+- A debug app left without its debugger freezes at the next JIT stop and hangs
+  the iOS installer: running instances are killed before installing (DVT kill).
+- Dart plugin registrant: although Flutter thinks the iPhone is "linux",
+  `dart_plugin_registrant.dart` covers every platform and picks one with
+  `Platform.isIOS` at runtime, so hot restart works with plugins.
+- Caching: if the generated native code, plugins, engine and tools don't
+  change, `swift build` is skipped (~30 s saved in a Firebase/Stripe app even
+  with nothing to do); if the `.app` is identical to the one installed on that
+  iPhone (tracked per device and app), it isn't reinstalled. The `.app` is
+  installed without compressing it.
+- `target.memory-module-load-level minimal`: without the extracted shared cache
+  (Xcode's DeviceSupport) lldb would read ~500 libraries from the iPhone's memory.
 
-**Build**
-- El lld del toolchain de Swift es más viejo que el SDK de iOS 27: se usa el de xtool
-  (`-B toolset/bin`).
-- SwiftPM siempre hace `git clone --mirror` completo; para dependencias con `exact:`
-  (firebase-ios-sdk) se baja solo el tag con `--depth 1` y se configura como mirror.
-- Swift Build verifica `actool` relativo al paquete (y no acepta symlinks), pero lo
-  ejecuta desde el `PATH`; además cachea la descripción del build (`XCBuildData`).
-- `flutter build bundle --target-platform ios` no sirve con native assets (le falta
-  `SdkRoot`): se usa `flutter assemble`, que busca los artefactos iOS en la caché de
-  Flutter (se enlazan al directorio de datos).
-- Macros: el `#Preview` de UIKit (`KitViewMacro`) no está en OpenAppleMacros; se compila
-  una versión con stubs (`support/patches/`) y `setup` la instala.
-- Swift Build no activa los cross-import overlays (`_PassKit_SwiftUI` →
-  `PayWithApplePayButton`): se pasa `-enable-cross-import-overlays`.
-- `-ObjC` al enlazar el Runner: sin él el linker descarta las categorías de Objective-C
-  de las librerías estáticas (AppAuth → "unrecognized selector ... presentAuthorizationRequest"
-  y Google Sign-In falla en ejecución). CocoaPods/Xcode lo agregan siempre.
-- Las copias de SwiftPM son de solo lectura: `actool` no debe copiar permisos.
-- `flutter assemble` release deja App.framework universal: se adelgaza con `lipo -thin`
-  como hace Xcode ("embed and thin").
-- CocoaPods sin Ruby: el CDN (`cdn.cocoapods.org`) rechaza el User-Agent por defecto de
-  Python (403). El target de cada pod es una carpeta con enlaces solo a sus fuentes: si
-  apunta al repo completo, SwiftPM toma como recursos los de las apps de ejemplo. Los
-  pods buscan sus bundles en la raíz del .app (`Bundle.main`), no en los de SwiftPM.
-- Solo se embeben en `Frameworks/` los Mach-O MH_DYLIB: xcframeworks estáticos (p. ej.
-  TensorFlowLiteC, MH_OBJECT) ya quedan dentro del ejecutable.
-- El AppImage de xtool no monta FUSE cuando lo lanza el snap de Flutter → se usa extraído.
+**Building**
+- The Swift toolchain's lld is older than the iOS 27 SDK: xtool's is used
+  instead (`-B toolset/bin`).
+- SwiftPM always does a full `git clone --mirror`; for `exact:` dependencies
+  (firebase-ios-sdk) only the tag is fetched with `--depth 1` and configured as
+  a mirror.
+- Swift Build checks `actool` relative to the package (and rejects symlinks) but
+  runs it from `PATH`; it also caches the build description (`XCBuildData`).
+- `flutter build bundle --target-platform ios` doesn't work with native assets
+  (no `SdkRoot`): `flutter assemble` is used instead, which looks for the iOS
+  artifacts in Flutter's cache (linked to the data directory).
+- Macros: UIKit `#Preview` (`KitViewMacro`) is missing from OpenAppleMacros; a
+  build with stubs is compiled (`support/patches/`) and `setup` installs it.
+- Swift Build doesn't enable cross-import overlays (`_PassKit_SwiftUI` →
+  `PayWithApplePayButton`): `-enable-cross-import-overlays` is passed.
+- `-ObjC` when linking the Runner: without it the linker drops Objective-C
+  categories from static libraries (AppAuth → "unrecognized selector ...
+  presentAuthorizationRequest" and Google Sign-In fails at runtime).
+  CocoaPods/Xcode always add it.
+- SwiftPM checkouts are read-only: `actool` must not copy their permissions.
+- A release `flutter assemble` produces a universal App.framework: it's thinned
+  with `lipo -thin`, like Xcode's "embed and thin".
+- CocoaPods without Ruby: the CDN (`cdn.cocoapods.org`) rejects Python's default
+  User-Agent (403). Each pod's target is a directory holding links to its
+  sources only: pointing it at the whole repo makes SwiftPM pick up the sample
+  apps' resources. Pods look for their bundles at the root of the .app
+  (`Bundle.main`), not in SwiftPM bundles.
+- Only Mach-O MH_DYLIB binaries are embedded in `Frameworks/`: static
+  xcframeworks (e.g. TensorFlowLiteC, MH_OBJECT) already live in the executable.
+- xtool's AppImage can't mount FUSE when launched from the Flutter snap → the
+  extracted copy is used.
 
-## Limitaciones conocidas
+## Known limitations
 
-- `actool` sin `Assets.car`: no hay colores ni datos del catálogo (`UIColor(named:)`,
-  `NSDataAsset`), y se pierde el "template rendering" de los íconos.
-- Debug: cuando cambia el Dart hay que reinstalar la app (~40 s en una app grande); sin
-  cambios nativos ni de Dart, `flutter run` salta compilación nativa e instalación (~11 s).
-- Cuenta gratis: el certificado dura 7 días, máximo 3 apps, sin push, Apple Pay ni
-  Sign in with Apple; xtool antepone `XTL-<team>.` al bundle ID. No borres la última app
-  firmada o iOS pide volver a confiar en el desarrollador.
-- Rutas por defecto pensadas para la máquina donde nació (`config.DEFAULT_DATA_DIR`);
-  usa `setup --data-dir`.
+- `actool` without `Assets.car`: no catalog colors or data (`UIColor(named:)`,
+  `NSDataAsset`), and icons lose "template rendering".
+- Debug: changing Dart code between launches requires reinstalling the app
+  (~40 s in a large app); with no native or Dart changes, `flutter run` skips the
+  native build and the install (~11 s). While running, hot reload takes ~0.5 s.
+- Free Apple ID: certificates last 7 days, 3 apps at most, no push, Apple Pay or
+  Sign in with Apple; xtool prefixes the bundle ID with `XTL-<team>.`. Don't
+  delete the last app signed with your Apple ID, or iOS asks you to trust the
+  developer again.
+- `type_text` (MCP) only types ASCII.
 
-## Próximos pasos
+## Roadmap
 
-1. Cambios de Dart sin reinstalar (subir el kernel al contenedor de la app y lanzar con
-   `--flutter-assets-dir`).
-2. Pods con Objective-C/C en la conversión de CocoaPods.
-3. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
-   (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).
+1. Dart changes without reinstalling (push the kernel into the app's container
+   and launch with `--flutter-assets-dir`).
+2. Objective-C/C pods in the CocoaPods conversion.
+3. Expo / React Native adapter: `expo prebuild` + CocoaPods; debugging is simpler
+   (Hermes has no JIT, Metro over the network), building is harder
+   (Pods.xcodeproj).
 
-## Créditos y licencias
+## Credits and licenses
 
-xlinux es sobre todo **pegamento**. El trabajo pesado lo hacen estos proyectos,
-que se **usan** (se instalan aparte; no se redistribuyen aquí salvo donde se indica):
+xlinux is mostly **glue**. The heavy lifting is done by these projects, which
+are **used** (installed separately; not redistributed here except where noted):
 
-| Proyecto | Autor(es) | Licencia | Para qué se usa |
+| Project | Author(s) | License | Used for |
 |---|---|---|---|
-| [xtool](https://github.com/xtool-org/xtool) | Kabir Oberai | MIT | SDK de iOS desde `Xcode.xip`, toolset/linker, Swift Build para iOS, firma e instalación; su `PackLib` fue la referencia para empaquetar SwiftPM en `.app` |
-| [OpenAppleMacros](https://github.com/xtool-org/OpenAppleMacros) | Kabir Oberai | MIT | macros de Xcode en Linux; **parche propio** en `support/patches/` |
-| [Darling](https://github.com/darlinghq/darling) | Darling Team | GPL-3.0 | correr el `gen_snapshot` de macOS en Linux |
-| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | doronz88 y colaboradores | GPL-3.0-or-later | túneles RSD (userspace / `tunneld`), DVT, Developer Disk Image, debugserver, instalación, syslog; `device_bridge.py` usa su librería |
-| [Flutter](https://github.com/flutter/flutter) | The Flutter Authors | BSD-3-Clause | engine iOS, `flutter assemble`, custom devices; **`support/flutter/flutter_lldb_helper.py` es una copia modificada** de su helper JIT (mantiene el aviso de copyright) |
-| [Dart SDK](https://github.com/dart-lang/sdk) | The Dart project authors | BSD-3-Clause | compilador (`gen_snapshot`, frontend_server) |
-| [Swift](https://github.com/swiftlang/swift), [SwiftPM](https://github.com/swiftlang/swift-package-manager), [Swift Build](https://github.com/swiftlang/swift-build), [swiftly](https://github.com/swiftlang/swiftly) | Apple y la comunidad de Swift | Apache-2.0 (con excepción de runtime) | compilar Swift/ObjC para iOS, resolver plugins |
-| [LLVM](https://github.com/llvm/llvm-project) (clang, lld, lldb, llvm-lipo/otool/…) | LLVM Developer Group | Apache-2.0 con LLVM Exception | compilar, enlazar, depurar, manipular Mach-O |
-| [CairoSVG](https://github.com/Kozea/CairoSVG) | Kozea | LGPL-3.0-or-later | rasterizar SVG en `actool` |
-| [Poppler](https://poppler.freedesktop.org/) (`pdftocairo`) | Poppler developers | GPL-2.0 / GPL-3.0 | rasterizar PDF en `actool` |
-| [libimobiledevice / usbmuxd](https://libimobiledevice.org/) | libimobiledevice project | LGPL-2.1 / GPL | conexión USB con el iPhone |
-| [uv](https://github.com/astral-sh/uv) | Astral | MIT / Apache-2.0 | instalar las herramientas de Python |
-| [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Anthropic y colaboradores | MIT | servidor MCP |
-| [Pillow](https://github.com/python-pillow/Pillow) | Jeffrey A. Clark y colaboradores | MIT-CMU | reducir las capturas del MCP |
+| [xtool](https://github.com/xtool-org/xtool) | Kabir Oberai | MIT | iOS SDK from `Xcode.xip`, toolset/linker, Swift Build for iOS, signing and installing; its `PackLib` was the reference for packaging SwiftPM into a `.app` |
+| [OpenAppleMacros](https://github.com/xtool-org/OpenAppleMacros) | Kabir Oberai | MIT | Xcode macros on Linux; **our patch** in `support/patches/` |
+| [Darling](https://github.com/darlinghq/darling) | Darling Team | GPL-3.0 | running macOS's `gen_snapshot` on Linux |
+| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | doronz88 and contributors | GPL-3.0-or-later | RSD tunnels (userspace / `tunneld`), DVT, Developer Disk Image, debugserver, installing, syslog, CoreDevice screen/HID; `device_bridge.py` and the MCP server use its library |
+| [Flutter](https://github.com/flutter/flutter) | The Flutter Authors | BSD-3-Clause | iOS engine, `flutter assemble`, custom devices; **`support/flutter/flutter_lldb_helper.py` is a modified copy** of its JIT helper (keeps its copyright notice) |
+| [Dart SDK](https://github.com/dart-lang/sdk) | The Dart project authors | BSD-3-Clause | compiler (`gen_snapshot`, frontend_server) |
+| [Swift](https://github.com/swiftlang/swift), [SwiftPM](https://github.com/swiftlang/swift-package-manager), [Swift Build](https://github.com/swiftlang/swift-build), [swiftly](https://github.com/swiftlang/swiftly) | Apple and the Swift community | Apache-2.0 (with runtime exception) | compiling Swift/ObjC for iOS, resolving plugins |
+| [LLVM](https://github.com/llvm/llvm-project) (clang, lld, lldb, llvm-lipo/otool/…) | LLVM Developer Group | Apache-2.0 with LLVM Exception | compiling, linking, debugging, Mach-O tooling |
+| [CairoSVG](https://github.com/Kozea/CairoSVG) | Kozea | LGPL-3.0-or-later | rasterizing SVG in `actool` |
+| [Poppler](https://poppler.freedesktop.org/) (`pdftocairo`) | Poppler developers | GPL-2.0 / GPL-3.0 | rasterizing PDF in `actool` |
+| [libimobiledevice / usbmuxd](https://libimobiledevice.org/) | libimobiledevice project | LGPL-2.1 / GPL | USB connection to the iPhone |
+| [uv](https://github.com/astral-sh/uv) | Astral | MIT / Apache-2.0 | installing the Python tools |
+| [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Anthropic and contributors | MIT | MCP server |
+| [Pillow](https://github.com/python-pillow/Pillow) | Jeffrey A. Clark and contributors | MIT-CMU | downscaling MCP screenshots |
 
-**SDK de Apple:** el SDK de iOS sale de `Xcode.xip`, que descargas tú desde
-developer.apple.com con tu Apple ID y aceptando su licencia; xlinux no lo
-redistribuye. Revisa los términos de Apple antes de usar esto en un contexto comercial.
+**Apple SDK:** the iOS SDK comes from `Xcode.xip`, which you download yourself
+from developer.apple.com with your Apple ID after accepting its license; xlinux
+does not redistribute it. Review Apple's terms before using this commercially.
 
-xlinux no está afiliado a Apple, Google, Flutter ni a ninguno de los proyectos
-anteriores. "iPhone", "iOS" y "Xcode" son marcas de Apple Inc.
+xlinux is not affiliated with Apple, Google, Flutter or any of the projects
+above. "iPhone", "iOS" and "Xcode" are trademarks of Apple Inc.
 
-### Licencia de xlinux
+### xlinux license
 
 Copyright (C) 2026 Cesar Andres Pereira.
 
-xlinux es software libre: puedes redistribuirlo y/o modificarlo bajo los términos
-de la **GNU General Public License versión 3** (o, a tu elección, cualquier
-versión posterior) publicada por la Free Software Foundation. Se distribuye con
-la esperanza de que sea útil, pero **sin ninguna garantía**. Ver [`LICENSE`](LICENSE).
+xlinux is free software: you can redistribute it and/or modify it under the
+terms of the **GNU General Public License version 3** (or, at your option, any
+later version) as published by the Free Software Foundation. It is distributed
+in the hope that it will be useful, but **without any warranty**. See
+[`LICENSE`](LICENSE).
 
-Los componentes de terceros listados arriba conservan sus propias licencias.
-`support/flutter/flutter_lldb_helper.py` deriva de Flutter (BSD-3-Clause) y
-mantiene su aviso; el parche de `support/patches/` aplica sobre OpenAppleMacros (MIT).
+The third-party components listed above keep their own licenses.
+`support/flutter/flutter_lldb_helper.py` derives from Flutter (BSD-3-Clause) and
+keeps its notice; the patch in `support/patches/` applies to OpenAppleMacros (MIT).

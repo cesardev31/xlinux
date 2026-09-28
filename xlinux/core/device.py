@@ -1,4 +1,4 @@
-"""Todo lo que habla con el iPhone: detectar, instalar, lanzar y depurar."""
+"""Everything that talks to the iPhone: detect, install, launch, capture and debug."""
 
 import base64
 import hashlib
@@ -26,7 +26,7 @@ def pmd3(*args, **kw):
 
 
 def connected_devices():
-    """[(udid, nombre)] de los iPhone conectados por USB."""
+    """[(udid, name)] of the iPhones connected over USB."""
     try:
         devices = json.loads(pmd3("usbmux", "list", check=False) or "[]")
     except ValueError:
@@ -38,15 +38,15 @@ def connected_devices():
 def first_device():
     devices = connected_devices()
     if not devices:
-        sys.exit("error: no hay ningún iPhone conectado por USB (¿desbloqueado y en 'Confiar'?)")
+        sys.exit("error: no iPhone connected over USB (is it unlocked, and did you tap 'Trust'?)")
     return devices[0]
 
 
 def ensure_developer_image():
-    """La Developer Disk Image (debugserver, DVT) se desmonta en cada reinicio."""
+    """The Developer Disk Image (debugserver, DVT) gets unmounted on every reboot."""
     mounted = pmd3("mounter", "list", check=False)
     if '"DeveloperDiskImage"' not in mounted:
-        log("Montando la Developer Disk Image")
+        log("Mounting the Developer Disk Image")
         run(["pymobiledevice3", "mounter", "auto-mount"], cwd=config.data_dir() / "tmp",
             capture_output=True, text=True)
 
@@ -55,7 +55,7 @@ INSTALL_TIMEOUT = 240
 
 
 def _ipa_bundle_id(path):
-    """Bundle ID de un .ipa o de una carpeta .app."""
+    """Bundle ID of an .ipa or a .app directory."""
     path = Path(path)
     if path.is_dir():
         return plistlib.loads((path / "Info.plist").read_bytes())["CFBundleIdentifier"]
@@ -64,13 +64,13 @@ def _ipa_bundle_id(path):
         return plistlib.loads(z.read(name))["CFBundleIdentifier"]
 
 
-# Con cuenta gratis el certificado dura 7 días: pasado este margen se reinstala
-# (y xtool vuelve a firmar) aunque la app no haya cambiado.
+# With a free Apple ID the certificate lasts 7 days: past this margin the app is
+# reinstalled (and re-signed by xtool) even if it didn't change.
 REINSTALL_AFTER = 5 * 24 * 3600
 
 
 def _content_hash(path):
-    """Huella del contenido de un .app (o .ipa), para no reinstalar lo mismo."""
+    """Content fingerprint of a .app (or .ipa), to avoid reinstalling the same thing."""
     path = Path(path)
     h = hashlib.sha256()
     files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
@@ -93,7 +93,7 @@ def _xtool_install(ipa, udid):
 
 
 def running_pids(bundle_id):
-    """PIDs de la app en el iPhone (DVT proclist, emparejando por la carpeta del .app)."""
+    """PIDs of the app on the iPhone (DVT proclist, matched by the .app directory)."""
     try:
         _, remote_app = installed_app(bundle_id)
     except SystemExit:
@@ -107,21 +107,21 @@ def running_pids(bundle_id):
 
 
 def terminate(bundle_id):
-    """Cierra las instancias vivas de la app. Una app de debug que quedó sin
-    debugger (congelada en una parada del JIT) traba al instalador de iOS."""
+    """Kill the app's running instances. A debug app left without its debugger
+    (frozen at a JIT stop) hangs the iOS installer."""
     for pid in running_pids(bundle_id):
-        log(f"Cerrando la instancia anterior de la app (pid {pid})")
+        log(f"Stopping the previous app instance (pid {pid})")
         run(["pymobiledevice3", "developer", "dvt", "kill", str(pid)], capture_output=True, text=True, check=False)
 
 
 def install(ipa, udid=None):
-    """Instala un .ipa o una carpeta .app (xtool acepta ambos; el .app evita
-    comprimir). Si es idéntica a la última instalada en este iPhone y sigue
-    ahí, no se reinstala."""
+    """Install an .ipa or a .app directory (xtool accepts both; a .app avoids
+    compressing). If it's identical to the last one installed on this iPhone
+    and still there, it isn't reinstalled."""
     ipa = Path(ipa)
     bundle_id = _ipa_bundle_id(ipa)
-    # Uno por iPhone y app (no por carpeta de build): instalar release y luego
-    # debug (o al revés) tiene que reinstalar aunque cada build no haya cambiado.
+    # One record per iPhone and app (not per build directory): installing
+    # release then debug (or vice versa) must reinstall even if neither changed.
     stamp = config.data_dir() / "installed" / (udid or "default") / f"{bundle_id}.json"
     stamp.parent.mkdir(parents=True, exist_ok=True)
     digest = _content_hash(ipa)
@@ -133,22 +133,22 @@ def install(ipa, udid=None):
             and time.time() - last.get("time", 0) < REINSTALL_AFTER):
         try:
             installed_app(bundle_id)
-            log("La app no cambió desde la última instalación: no se reinstala")
+            log("The app didn't change since the last install: skipping reinstall")
             return
         except SystemExit:
-            pass  # ya no está en el iPhone: instalar
+            pass  # no longer on the iPhone: install it
     ensure_developer_image()
     terminate(bundle_id)
-    log("Firmando e instalando con xtool")
+    log("Signing and installing with xtool")
     ok, out = _xtool_install(ipa, udid)
     if ok:
         stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
         return
     if out == "timeout":
-        # Visto en la práctica: si una instalación se corta a la mitad, iOS queda
-        # trabado con ese bundle ID y xtool espera para siempre al subir la app.
-        # Desinstalarla (solo esa; se pierden sus datos locales) lo destraba.
-        log(f"La instalación se trabó; desinstalando {bundle_id} del iPhone y reintentando")
+        # Seen in practice: if an install is interrupted halfway, iOS gets stuck
+        # on that bundle ID and xtool waits forever uploading the app.
+        # Uninstalling it (only that app; its local data is lost) unsticks it.
+        log(f"The install got stuck; uninstalling {bundle_id} from the iPhone and retrying")
         try:
             real_id, _ = installed_app(bundle_id)
             run(["pymobiledevice3", "apps", "uninstall", real_id], capture_output=True, text=True, check=False)
@@ -158,23 +158,23 @@ def install(ipa, udid=None):
         if ok:
             stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
             return
-    sys.exit(f"error: xtool no pudo instalar la app:\n{out[-2000:]}")
+    sys.exit(f"error: xtool could not install the app:\n{out[-2000:]}")
 
 
 def installed_app(bundle_id):
-    """(bundle id real, ruta en el iPhone). Con cuenta gratis xtool antepone XTL-<team>."""
+    """(actual bundle id, path on the iPhone). With a free Apple ID xtool prefixes XTL-<team>."""
     apps = json.loads(pmd3("apps", "list", "-t", "User"))
     for real_id, info in apps.items():
         if real_id == bundle_id or real_id.endswith("." + bundle_id):
             return real_id, info["Path"]
-    sys.exit(f"error: la app {bundle_id} no está instalada en el iPhone")
+    sys.exit(f"error: {bundle_id} is not installed on the iPhone")
 
 
 def launch(bundle_id):
-    """Abre la app sin debugger (release/profile, o frameworks sin JIT)."""
+    """Launch the app without a debugger (release/profile, or frameworks without a JIT)."""
     ensure_developer_image()
     real_id, _ = installed_app(bundle_id)
-    log(f"Abriendo {real_id}")
+    log(f"Launching {real_id}")
     run(["pymobiledevice3", "developer", "dvt", "launch", real_id], capture_output=True, text=True)
 
 
@@ -184,7 +184,7 @@ def stream_logs(process_name="Runner", match=None):
 
 
 def _tunneld_has(udid):
-    """¿Está corriendo `tunneld` (túnel de kernel) con este iPhone?"""
+    """Is `tunneld` (the kernel tunnel) running with this iPhone?"""
     try:
         with urllib.request.urlopen("http://127.0.0.1:49151/", timeout=2) as r:
             return udid in json.loads(r.read())
@@ -193,8 +193,8 @@ def _tunneld_has(udid):
 
 
 def _visual_command(udid, *args):
-    """Comando CoreDevice fijado al iPhone indicado: por el túnel de kernel si
-    `tunneld` está corriendo (video mucho más fluido), si no por el userspace."""
+    """CoreDevice command pinned to the given iPhone: over the kernel tunnel if
+    `tunneld` is running (much smoother video), otherwise the userspace one."""
     env = config.tool_env()
     env["PYMOBILEDEVICE3_UDID"] = udid
     tunnel = ["--tunnel", udid] if _tunneld_has(udid) else ["--userspace"]
@@ -202,7 +202,7 @@ def _visual_command(udid, *args):
 
 
 def screenshot(path, udid):
-    """Captura la pantalla completa del iPhone como PNG."""
+    """Capture the full iPhone screen as a PNG."""
     ensure_developer_image()
     path = Path(path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,43 +211,43 @@ def screenshot(path, udid):
     )
     run(cmd, env=env, capture_output=True, text=True)
     if not path.exists() or path.stat().st_size == 0:
-        sys.exit("error: pymobiledevice3 no produjo la captura de pantalla")
+        sys.exit("error: pymobiledevice3 did not produce the screenshot")
     return path
 
 
 def screenshot_base64(udid):
-    """Captura PNG codificada para el protocolo de custom devices de Flutter."""
+    """PNG screenshot encoded for Flutter's custom device protocol."""
     with tempfile.TemporaryDirectory(prefix="xlinux-screenshot-") as directory:
         path = screenshot(Path(directory) / "iphone.png", udid)
         return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
 def screenshot_info(path, udid):
-    """Captura y devuelve metadatos pequeños para consumidores automáticos."""
+    """Capture and return small metadata for automated consumers."""
     path = screenshot(path, udid)
     with path.open("rb") as image:
         header = image.read(24)
     if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
-        sys.exit("error: la captura no es un PNG válido")
+        sys.exit("error: the screenshot is not a valid PNG")
     width, height = struct.unpack(">II", header[16:24])
     return {"ok": True, "path": str(path), "format": "png", "width": width, "height": height}
 
 
 def _hid_coordinate(value):
     if not 0.0 <= value <= 1.0:
-        raise ValueError("las coordenadas deben estar entre 0 y 1")
+        raise ValueError("coordinates must be between 0 and 1")
     return round(value * 65535)
 
 
 def agent_input(udid, action, values=(), duration=0.3):
-    """Ejecuta una acción determinista para agentes usando coordenadas 0..1."""
+    """Run a deterministic agent action using 0..1 coordinates."""
     ensure_developer_image()
     if action == "tap":
         x, y = (_hid_coordinate(float(v)) for v in values)
         command = ["developer", "core-device", "universal-hid-service", "tap", str(x), str(y)]
     elif action == "swipe":
         x1, y1, x2, y2 = (_hid_coordinate(float(v)) for v in values)
-        # drag genera contacto real; el comando swipe de CoreDevice sólo mueve el puntero.
+        # drag makes real touch contact; CoreDevice's swipe only moves the pointer.
         command = ["developer", "core-device", "universal-hid-service", "drag",
                    str(x1), str(y1), str(x2), str(y2), "--duration", str(duration)]
     elif action == "type":
@@ -255,7 +255,7 @@ def agent_input(udid, action, values=(), duration=0.3):
     elif action == "button":
         command = ["developer", "core-device", "hid", "button", str(values[0])]
     else:
-        raise ValueError(f"acción desconocida: {action}")
+        raise ValueError(f"unknown action: {action}")
     cmd, env = _visual_command(udid, *command)
     run(cmd, env=env, capture_output=True, text=True)
     return {"ok": True, "action": action}
@@ -263,12 +263,12 @@ def agent_input(udid, action, values=(), duration=0.3):
 
 def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
            audio=False, share_clipboard=False):
-    """Sirve la pantalla del iPhone por navegador o VNC, con control HID."""
+    """Serve the iPhone screen over a browser or VNC, with HID control."""
     ensure_developer_image()
     if mode not in ("web", "vnc"):
-        raise ValueError(f"modo de mirror desconocido: {mode}")
+        raise ValueError(f"unknown mirror mode: {mode}")
     if bind not in ("127.0.0.1", "localhost", "::1") and not password:
-        sys.exit("error: usa --password al publicar el mirror fuera de localhost")
+        sys.exit("error: use --password when exposing the mirror beyond localhost")
     port = port or (8080 if mode == "web" else 5901)
     port_option = "--http-port" if mode == "web" else "--port"
     command = ["developer", "core-device", "display", f"serve-{mode}",
@@ -276,7 +276,7 @@ def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
     if password:
         command += ["--password", password]
     if mode == "web":
-        # El audio de CoreDevice es AAC-ELD y su decodificador solo existe en macOS.
+        # CoreDevice audio is AAC-ELD, whose decoder only exists on macOS.
         command.append("--no-audio")
     if mode == "vnc":
         if audio:
@@ -285,12 +285,12 @@ def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
             command.append("--share-clipboard")
     cmd, env = _visual_command(udid, *command)
     protocol = "http" if mode == "web" else "vnc"
-    log(f"Pantalla del iPhone en {protocol}://{bind}:{port} (Ctrl+C para salir)")
+    log(f"iPhone screen at {protocol}://{bind}:{port} (Ctrl+C to quit)")
     process = subprocess.Popen(cmd, env=env)
     try:
         return process.wait()
     except KeyboardInterrupt:
-        # Ctrl+C también le llega al servidor, que se cierra solo: esperarlo.
+        # Ctrl+C also reaches the server, which shuts down on its own: wait for it.
         try:
             return process.wait(timeout=15)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -305,15 +305,16 @@ def free_port():
 
 
 class DebugSession:
-    """Lanza la app bajo lldb y reenvía puertos del iPhone a 127.0.0.1.
+    """Launch the app under lldb and forward iPhone ports to 127.0.0.1.
 
-    iOS 17+: debugserver no puede lanzar apps, así que support/core/device_bridge.py
-    la lanza suspendida por DVT y support/core/lldb_driver.py se adjunta al pid.
+    iOS 17+: debugserver can't launch apps, so support/core/device_bridge.py
+    launches it suspended through DVT and support/core/lldb_driver.py attaches
+    to the pid.
 
-    local_app:    el .app compilado en Linux (para los símbolos)
-    bundle_id:    el del proyecto (el instalado puede tener prefijo XTL-<team>)
-    lldb_helpers: scripts de lldb a importar (p. ej. el helper JIT de Flutter)
-    forward_ports: puertos del iPhone a exponer en el mismo puerto local
+    local_app:     the .app built on Linux (for symbols)
+    bundle_id:     the project's (the installed one may have an XTL-<team> prefix)
+    lldb_helpers:  lldb scripts to import (e.g. Flutter's JIT helper)
+    forward_ports: iPhone ports exposed on the same local port
     """
 
     def __init__(self, local_app, bundle_id, udid, lldb_helpers=(), forward_ports=()):
@@ -337,16 +338,16 @@ class DebugSession:
             cmd += ["--forward", str(port)]
         self.bridge = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        text=True, env=config.tool_env())
-        bridge_info = self._wait_for(self.bridge, "BRIDGE_READY", 90, "el puente con el iPhone")
+        bridge_info = self._wait_for(self.bridge, "BRIDGE_READY", 90, "the iPhone bridge")
         debugserver = bridge_info.get("DEBUGSERVER", f"127.0.0.1:{debug_port}")
-        log(f"Túnel con el iPhone: {bridge_info.get('TUNNEL', '?')}")
+        log(f"iPhone tunnel: {bridge_info.get('TUNNEL', '?')}")
 
         control = socket.create_connection(("127.0.0.1", control_port), timeout=90)
         control.sendall((json.dumps({"cmd": "launch", "bundle_id": real_id, "args": list(launch_args)}) + "\n").encode())
         response = json.loads(control.makefile().readline() or "{}")
         if "pid" not in response:
             control.close()
-            sys.exit(f"error: iOS no lanzó la app: {response.get('error', 'sin respuesta')}")
+            sys.exit(f"error: iOS did not launch the app: {response.get('error', 'no response')}")
 
         self.stop_file = tempfile.mktemp(prefix="xlinux-stop-")
         env = config.tool_env()
@@ -358,21 +359,21 @@ class DebugSession:
             ["lldb", "--batch", "-o", f"command script import {config.SUPPORT / 'core/lldb_driver.py'}"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         try:
-            self._wait_for(self.lldb, "[lldb] app corriendo", 120, "lldb")
+            self._wait_for(self.lldb, "[lldb] app running", 120, "lldb")
         finally:
-            # La sesión DVT mantiene la app suspendida: se libera cuando lldb ya
-            # está adjunto (si no, la app arranca sin debugger).
+            # The DVT session keeps the app suspended: release it only once lldb
+            # is attached (otherwise the app starts without a debugger).
             control.close()
 
     @staticmethod
     def _wait_for(process, marker, timeout, what):
-        """Lee la salida hasta `marker`; devuelve las líneas CLAVE=valor vistas."""
+        """Read output until `marker`; return the KEY=value lines seen."""
         info = {}
         deadline = time.time() + timeout
         while time.time() < deadline:
             line = process.stdout.readline()
             if not line:
-                sys.exit(f"error: {what} terminó antes de tiempo")
+                sys.exit(f"error: {what} exited early")
             if os.environ.get("XLINUX_VERBOSE"):
                 print(line.rstrip(), file=sys.stderr, flush=True)
             key, sep, value = line.strip().partition("=")
@@ -382,10 +383,10 @@ class DebugSession:
                 return info
             if "[lldb] error" in line or "Traceback" in line:
                 print(line.rstrip(), file=sys.stderr)
-        sys.exit(f"error: {what} no respondió en {timeout}s")
+        sys.exit(f"error: {what} did not respond within {timeout}s")
 
     def wait(self):
-        """Muestra la salida de lldb hasta que la app termine."""
+        """Show lldb's output until the app exits."""
         for line in self.lldb.stdout:
             if line.startswith("[lldb]") or os.environ.get("XLINUX_VERBOSE"):
                 print(line.rstrip(), file=sys.stderr, flush=True)
@@ -402,20 +403,20 @@ class DebugSession:
             self.bridge.terminate()
         if self.stop_file and os.path.exists(self.stop_file):
             os.unlink(self.stop_file)
-            # lldb no siempre logra matarla: sin debugger una app de debug queda
-            # congelada en la siguiente parada del JIT y traba la próxima instalación.
+            # lldb doesn't always manage to kill it: without a debugger a debug app
+            # freezes at the next JIT stop and hangs the next install.
             terminate(self.bundle_id)
 
     def run_until_parent_exits(self, launch_args, on_ready=None):
-        """start() + wait(), limpiando si nos matan o si el proceso padre (la
-        herramienta del framework, VS Code...) desaparece sin avisar."""
+        """start() + wait(), cleaning up if we're killed or if the parent process
+        (the framework's tool, VS Code...) disappears without notice."""
 
-        def terminate(*_):
+        def on_signal(*_):
             self.stop()
             sys.exit(0)
 
-        signal.signal(signal.SIGTERM, terminate)
-        signal.signal(signal.SIGINT, terminate)
+        signal.signal(signal.SIGTERM, on_signal)
+        signal.signal(signal.SIGINT, on_signal)
         parent = os.getppid()
 
         def watch_parent():

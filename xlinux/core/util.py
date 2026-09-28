@@ -10,7 +10,7 @@ def log(msg):
 
 
 def run(cmd, check=True, **kw):
-    """Corre un comando con el entorno de la herramienta; aborta si falla."""
+    """Run a command with the tool environment; abort if it fails."""
     cmd = [str(c) for c in cmd]
     if os.environ.get("XLINUX_VERBOSE"):
         print("   $ " + " ".join(cmd), file=sys.stderr, flush=True)
@@ -21,7 +21,7 @@ def run(cmd, check=True, **kw):
         if isinstance(result.stderr, (str, bytes)) and result.stderr:
             detail = result.stderr if isinstance(result.stderr, str) else result.stderr.decode(errors="replace")
             detail = "\n" + detail.strip()[-3000:]
-        sys.exit(f"error: falló (código {result.returncode}): {' '.join(cmd[:3])}{detail}")
+        sys.exit(f"error: command failed (exit {result.returncode}): {' '.join(cmd[:3])}{detail}")
     return result
 
 

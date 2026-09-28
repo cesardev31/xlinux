@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""actool sustituto: compila asset catalogs (.xcassets) sin Xcode.
+"""actool stand-in: compiles asset catalogs (.xcassets) without Xcode.
 
-El actool de Apple produce Assets.car (formato binario privado de CoreUI).
-Aquí cada imageset se escribe como PNG sueltos (`nombre@2x.png`,
-`nombre@3x.png`, `nombre@2x~ipad.png`) en el directorio de salida. UIKit los
-encuentra igual: `UIImage(named:in:compatibleWith:)` busca primero en el
-catálogo compilado y luego en los archivos del bundle.
+Apple's actool produces Assets.car (CoreUI's private binary format). Here each
+imageset is written as loose PNGs (`name@2x.png`, `name@3x.png`,
+`name@2x~ipad.png`) into the output directory. UIKit still finds them:
+`UIImage(named:in:compatibleWith:)` looks in the compiled catalog first and
+then in the bundle's files.
 
-- PNG/JPG: se copian con su escala.
-- PDF/SVG vectoriales: se rasterizan a @2x y @3x (pdftocairo / cairosvg).
-- AppIcon (--app-icon): íconos + CFBundleIcons en el Info.plist parcial.
-- colorset/dataset/symbolset: no tienen equivalente sin Assets.car → warning.
-- Se pierde "template-rendering-intent" (el ícono no se tiñe solo).
+- PNG/JPG: copied with their scale.
+- Vector PDF/SVG: rasterized to @2x and @3x (pdftocairo / cairosvg).
+- AppIcon (--app-icon): icons + CFBundleIcons in the partial Info.plist.
+- colorset/dataset/symbolset: no equivalent without Assets.car → warning.
+- "template-rendering-intent" is lost (the icon isn't tinted automatically).
 
-Implementa la interfaz que usan Xcode / Swift Build (AssetCatalogCompiler.xcspec).
+Implements the interface used by Xcode / Swift Build (AssetCatalogCompiler.xcspec).
 """
 
 import json
@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from xlinux.core import config  # noqa: E402
 
-# cairosvg vive en el venv del directorio de datos: re-ejecutarse con ese Python.
+# cairosvg lives in the data directory's venv: re-exec with that Python.
 try:
     import cairosvg
 except ImportError:
@@ -42,8 +42,8 @@ VECTOR_SCALES = (2, 3)
 
 
 def put(src, dst):
-    """Copia solo el contenido: las copias de SwiftPM son de solo lectura y
-    copiar permisos impediría sobrescribir la salida en la siguiente compilación."""
+    """Copy contents only: SwiftPM checkouts are read-only, and copying their
+    permissions would prevent overwriting the output on the next build."""
     if dst.exists():
         dst.unlink()
     shutil.copyfile(src, dst)
@@ -66,7 +66,7 @@ def parse(argv):
         elif arg.startswith("--generate-") and arg.endswith(("-symbols", "-path", "-index")):
             opts["generated"].append((arg, next(it)))
         elif arg.startswith("--"):
-            # Opciones con valor que no afectan el resultado aquí.
+            # Options with a value that don't affect the output here.
             if arg in ("--enable-on-demand-resources", "--development-region", "--target-device",
                        "--minimum-deployment-target", "--platform", "--filter-for-device-model",
                        "--filter-for-device-os-version", "--sticker-pack-identifier-prefix",
@@ -106,7 +106,7 @@ def render_vector(src, dst, scale):
         return True
     if src.suffix.lower() == ".svg":
         if cairosvg is None:
-            warn(f"sin cairosvg no se puede rasterizar {src.name}")
+            warn(f"cannot rasterize {src.name} without cairosvg")
             return False
         cairosvg.svg2png(url=str(src), write_to=str(dst), scale=scale)
         return True
@@ -135,8 +135,8 @@ def compile_imageset(imageset, name, out, outputs):
                 try:
                     if render_vector(src, dst, s):
                         outputs.append(dst)
-                except Exception as e:  # un SVG raro no debe tumbar todo el catálogo
-                    warn(f"no se pudo rasterizar {imageset.name}/{filename}: {e}")
+                except Exception as e:  # one odd SVG must not break the whole catalog
+                    warn(f"could not rasterize {imageset.name}/{filename}: {e}")
                     break
         elif ext in (".png", ".jpg", ".jpeg"):
             s = scale or "1x"
@@ -176,7 +176,7 @@ def walk(folder, prefix, opts, out, outputs, partial):
                 partial.update(compile_app_icon(entry, out, outputs))
         elif entry.suffix in (".colorset", ".dataset", ".symbolset", ".imagestack", ".brandassets",
                               ".launchimage", ".textureset", ".cubetextureset"):
-            warn(f"{entry.name}: {entry.suffix[1:]} no está soportado sin Assets.car; se omite")
+            warn(f"{entry.name}: {entry.suffix[1:]} is not supported without Assets.car; skipping")
         elif not entry.suffix:
             contents = entry / "Contents.json"
             namespace = contents.exists() and json.loads(contents.read_text()).get(
@@ -185,8 +185,8 @@ def walk(folder, prefix, opts, out, outputs, partial):
 
 
 def write_dependency_info(path, inputs, outputs):
-    # Formato de Xcode (el mismo de `ld -dependency_info`): registros
-    # <opcode><cadena>\0 — 0x00 versión, 0x10 entrada, 0x40 salida.
+    # Xcode's format (the same as `ld -dependency_info`): records
+    # <opcode><string>\0 — 0x00 version, 0x10 input, 0x40 output.
     data = b"\x00actool-27.0\x00"
     data += b"".join(b"\x10" + str(p).encode() + b"\x00" for p in inputs)
     data += b"".join(b"\x40" + str(p).encode() + b"\x00" for p in outputs)
@@ -199,7 +199,7 @@ def main(argv):
         return 0
     opts = parse(argv)
     if not opts["compile"]:
-        print("error: actool (xlinux) solo soporta --compile", file=sys.stderr)
+        print("error: actool (xlinux) only supports --compile", file=sys.stderr)
         return 1
     out = Path(opts["compile"])
     out.mkdir(parents=True, exist_ok=True)
@@ -213,7 +213,7 @@ def main(argv):
     if opts["dependency_info"]:
         write_dependency_info(opts["dependency_info"], inputs, outputs)
     for flag, path in opts["generated"]:
-        # Símbolos de assets (ImageResource/ColorResource, Xcode 15+): vacíos.
+        # Asset symbols (ImageResource/ColorResource, Xcode 15+): empty.
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text("" if not path.endswith(".swift") else "import Foundation\n")
     if opts["output_format"] == "xml1":

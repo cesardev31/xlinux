@@ -1,28 +1,28 @@
-"""Puente local hacia el iPhone para depurar apps sin sudo.
+"""Local bridge to the iPhone for debugging apps without sudo.
 
-Abre en 127.0.0.1:
-  --debugserver-port  -> debugserver del iPhone (iOS 17+, túnel userspace, sin check-in)
-  --forward PUERTO    -> (repetible) el mismo puerto dentro del iPhone, por usbmux
-                         (p. ej. el Dart VM Service de Flutter)
-  --control-port      -> comandos JSON por línea. En iOS 17+ debugserver no puede
-                         lanzar apps ("Operation not permitted"): se lanzan
-                         suspendidas por DVT y lldb se adjunta al pid.
+Listens on 127.0.0.1:
+  --debugserver-port  -> the iPhone's debugserver (iOS 17+, userspace tunnel, no check-in)
+  --forward PORT      -> (repeatable) the same port on the iPhone, over usbmux
+                         (e.g. Flutter's Dart VM Service)
+  --control-port      -> line-delimited JSON commands. On iOS 17+ debugserver can't
+                         launch apps ("Operation not permitted"): they're launched
+                         suspended through DVT and lldb attaches to the pid.
                          {"cmd": "launch", "bundle_id": ..., "args": [...]} -> {"pid": N}
-                         La sesión DVT sigue abierta (y la app suspendida) hasta
-                         que el cliente cierra el socket: si se cierra antes,
-                         iOS reanuda la app y Flutter arranca sin debugger.
+                         The DVT session stays open (and the app suspended) until
+                         the client closes the socket: if it closes earlier, iOS
+                         resumes the app and Flutter starts without a debugger.
 
-Si está corriendo el túnel de kernel de pymobiledevice3 (`sudo pymobiledevice3
-remote tunneld`), se usa ese: lldb se conecta directo a debugserver por la red
-del sistema, mucho más rápido que el TCP en Python del túnel userspace (las
-paradas del JIT de Flutter escriben MB en la memoria de la app). Si no, se usa
-el túnel userspace. El puente anuncia la dirección con `DEBUGSERVER=host:puerto`.
+If pymobiledevice3's kernel tunnel is running (`sudo pymobiledevice3 remote
+tunneld`) it is used instead: lldb connects straight to debugserver over the
+system network stack, much faster than the userspace tunnel's pure-Python TCP
+(Flutter's JIT stops write MBs into the app's memory). Otherwise the userspace
+tunnel is used. The bridge announces the address as `DEBUGSERVER=host:port`.
 
-pymobiledevice3 trae un reenviador para debugserver, pero hace el check-in de
-lockdown, y el debugproxy de iOS 17+ espera una conexión TCP cruda (así lo usa
-su propio flujo `debugserver lldb`), por lo que lldb se quedaba colgado.
+pymobiledevice3 ships a debugserver forwarder, but it performs the lockdown
+check-in, while iOS 17+'s debugproxy expects a raw TCP connection (that's how
+its own `debugserver lldb` flow uses it), so lldb used to hang.
 
-Se corre con el Python del entorno de pymobiledevice3.
+Runs on the pymobiledevice3 environment's Python.
 """
 
 import argparse
@@ -59,7 +59,7 @@ def control_handler(rsd):
         try:
             request = json.loads(await reader.readline())
             if request.get("cmd") != "launch":
-                raise ValueError(f"comando desconocido: {request.get('cmd')}")
+                raise ValueError(f"unknown command: {request.get('cmd')}")
             async with DvtProvider(rsd) as dvt, ProcessControl(dvt) as process_control:
                 pid = await process_control.launch(
                     bundle_id=request["bundle_id"],
@@ -68,8 +68,8 @@ def control_handler(rsd):
                     start_suspended=True,
                 )
                 await reply({"pid": pid})
-                await reader.read()  # esperar a que el cliente (ya con lldb adjunto) cierre
-        except Exception as e:  # se reporta al cliente en vez de tumbar el puente
+                await reader.read()  # wait for the client (with lldb attached) to close
+        except Exception as e:  # reported to the client instead of killing the bridge
             try:
                 await reply({"error": f"{type(e).__name__}: {e}"})
             except ConnectionError:
@@ -112,7 +112,7 @@ async def main():
 
 @contextlib.asynccontextmanager
 async def open_rsd(udid):
-    """RSD por el túnel de kernel (tunneld) si está disponible; si no, userspace."""
+    """RSD over the kernel tunnel (tunneld) if available; otherwise userspace."""
     try:
         from pymobiledevice3.tunneld.api import get_tunneld_device_by_udid
         rsd = await get_tunneld_device_by_udid(udid)

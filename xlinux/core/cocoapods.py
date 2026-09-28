@@ -1,19 +1,19 @@
-"""CocoaPods → SwiftPM, sin Ruby ni `pod install`.
+"""CocoaPods → SwiftPM, without Ruby or `pod install`.
 
-Para plugins/dependencias que solo tienen podspec:
+For plugins/dependencies that only ship a podspec:
 
-- podspecs locales (Ruby, p. ej. los de plugins de Flutter): se leen con un
-  intérprete mínimo de su DSL (asignaciones `s.x = …` y `s.dependency …`).
-- pods de terceros: el podspec en JSON se baja del CDN de CocoaPods, se
-  resuelve la versión (`~>`, `>=`, `=`…) y el código se baja sin historial.
-- cada pod se convierte en un paquete SwiftPM: fuentes explícitas, frameworks
-  del sistema, `binaryTarget` para xcframeworks y `COCOAPODS` definido.
-- los `resource_bundles` se arman como los arma CocoaPods (`<nombre>.bundle` en
-  la raíz del .app; los catálogos pasan por nuestro actool), porque el código
-  de los pods los busca ahí y no en los bundles de SwiftPM.
+- local podspecs (Ruby, e.g. Flutter plugins'): read with a minimal
+  interpreter of their DSL (`s.x = …` assignments and `s.dependency …`).
+- third-party pods: the JSON podspec comes from the CocoaPods CDN, the version
+  is resolved (`~>`, `>=`, `=`…) and the source is fetched without history.
+- each pod becomes a SwiftPM package: explicit sources, system frameworks,
+  `binaryTarget` for xcframeworks and `COCOAPODS` defined.
+- `resource_bundles` are assembled the way CocoaPods does (`<name>.bundle` at
+  the root of the .app; catalogs go through our actool), because pod code
+  looks for them there rather than in SwiftPM bundles.
 
-Soporta pods en Swift (con xcframeworks binarios). Pods con Objective-C/C
-todavía no.
+Supports Swift pods (with binary xcframeworks). Objective-C/C pods are not
+supported yet.
 """
 
 import ast
@@ -35,14 +35,14 @@ from .util import log, run
 CDN = "https://cdn.cocoapods.org"
 SOURCE_EXT = {".swift"}
 UNSUPPORTED_EXT = {".m", ".mm", ".c", ".cc", ".cpp"}
-# Dependencias que resuelve el framework (no son pods a bajar).
+# Dependencies provided by the framework itself (not pods to fetch).
 PROVIDED = {"Flutter", "React", "React-Core"}
 
 
 # --------------------------------------------------------------------------- podspec Ruby
 
 def _ruby_literal(text):
-    """Convierte un literal de Ruby sencillo (strings, arrays, hashes, símbolos) a Python."""
+    """Convert a simple Ruby literal (strings, arrays, hashes, symbols) to Python."""
     t = text.strip().rstrip(",")
     t = re.sub(r"%w[\[(](.*?)[\])]", lambda m: repr(m.group(1).split()), t, flags=re.S)
     t = re.sub(r"(?<![\w\"']):(\w+)", r"'\1'", t)          # :ios → 'ios'
@@ -54,7 +54,7 @@ def _ruby_literal(text):
 
 
 def parse_ruby_podspec(path):
-    """Lee un podspec Ruby típico de plugin. Devuelve el mismo formato que el JSON del CDN."""
+    """Read a typical plugin Ruby podspec. Returns the same shape as the CDN JSON."""
     text = Path(path).read_text()
     text = re.sub(r"<<[-~]?(['\"]?)(\w+)\1.*?^\s*\2\s*$", "''", text, flags=re.S | re.M)  # heredocs
     spec = {"dependencies": {}}
@@ -109,14 +109,14 @@ def _split_args(text):
     return out + ([cur] if cur.strip() else [])
 
 
-# --------------------------------------------------------------------------- CDN y versiones
+# --------------------------------------------------------------------------- CDN and versions
 
 def _shard(name):
     return list(hashlib.md5(name.encode()).hexdigest()[:3])
 
 
 def _fetch(url):
-    # El CDN rechaza (403) el User-Agent por defecto de urllib.
+    # The CDN rejects (403) urllib's default User-Agent.
     request = urllib.request.Request(url, headers={"User-Agent": "xlinux (+https://github.com/cesardev31/xlinux)"})
     with urllib.request.urlopen(request, timeout=60) as r:
         return r.read()
@@ -156,11 +156,11 @@ def resolve(name, reqs):
             versions = [v for v in parts[1:] if v]
             break
     else:
-        sys.exit(f"error: el pod {name} no existe en el CDN de CocoaPods")
+        sys.exit(f"error: pod {name} not found on the CocoaPods CDN")
     stable = [v for v in versions if "-" not in v] or versions
     ok = sorted((v for v in stable if _satisfies(v, reqs)), key=_version_key)
     if not ok:
-        sys.exit(f"error: ninguna versión de {name} cumple {reqs}")
+        sys.exit(f"error: no version of {name} satisfies {reqs}")
     return ok[-1]
 
 
@@ -174,15 +174,15 @@ def fetch_spec(name, version):
 
 
 def fetch_source(spec):
-    """Baja el código del pod (sin historial) al directorio de datos. Pods del
-    mismo repo y tag comparten la copia."""
+    """Fetch the pod's source (without history) into the data directory. Pods
+    from the same repo and tag share one copy."""
     src = spec["source"]
     if "git" in src:
         ref = src.get("tag") or src.get("commit") or src.get("branch") or "HEAD"
         key = re.sub(r"[^A-Za-z0-9._-]", "_", src["git"].split("://")[-1].removesuffix(".git")) + "@" + ref
         dest = config.data_dir() / "pods/src" / key
         if not dest.exists():
-            log(f"Descargando {spec['name']} {spec['version']} sin historial")
+            log(f"Downloading {spec['name']} {spec['version']} without history")
             tmp = dest.with_suffix(".tmp")
             shutil.rmtree(tmp, ignore_errors=True)
             if "commit" in src:
@@ -198,7 +198,7 @@ def fetch_source(spec):
         url = src["http"]
         dest = config.data_dir() / "pods/src" / (spec["name"] + "-" + spec["version"])
         if not dest.exists():
-            log(f"Descargando {spec['name']} {spec['version']}")
+            log(f"Downloading {spec['name']} {spec['version']}")
             archive = dest.with_suffix(".download")
             archive.write_bytes(_fetch(url))
             tmp = dest.with_suffix(".tmp")
@@ -213,7 +213,7 @@ def fetch_source(spec):
             archive.unlink()
             tmp.rename(dest)
         return dest
-    sys.exit(f"error: fuente no soportada para el pod {spec['name']}: {src}")
+    sys.exit(f"error: unsupported source for pod {spec['name']}: {src}")
 
 
 # --------------------------------------------------------------------------- specs
@@ -225,7 +225,7 @@ def _as_list(value):
 
 
 def flatten(spec):
-    """Mezcla las subspecs por defecto en la spec principal (como `pod 'X'`)."""
+    """Merge the default subspecs into the main spec (like `pod 'X'`)."""
     spec = dict(spec)
     subs = {s["name"]: s for s in spec.get("subspecs", [])}
     wanted = _as_list(spec.get("default_subspecs") or spec.get("default_subspec")) or list(subs)
@@ -260,7 +260,7 @@ def _expand(pattern):
 
 
 def glob(root, patterns):
-    """Globs de CocoaPods (`**`, `{a,b}`; un directorio incluye todo su contenido)."""
+    """CocoaPods globs (`**`, `{a,b}`; a directory includes all of its contents)."""
     found = set()
     for pattern in _as_list(patterns):
         for p in _expand(pattern):
@@ -278,7 +278,7 @@ def _files(root, spec, key, exclude=()):
     return out
 
 
-# --------------------------------------------------------------------------- generación
+# --------------------------------------------------------------------------- generation
 
 class Pod:
     def __init__(self, spec, root, deps):
@@ -294,7 +294,7 @@ class Pod:
 
 
 def load_graph(local_spec, local_root):
-    """Resuelve el podspec local y todas sus dependencias. Devuelve (Pod raíz, [todos])."""
+    """Resolve the local podspec and all its dependencies. Returns (root Pod, [all])."""
     pods = {}
 
     def load(spec, root):
@@ -307,7 +307,7 @@ def load_graph(local_spec, local_root):
             if base not in pods:
                 version = resolve(base, _as_list(reqs))
                 dep_spec = fetch_spec(base, version)
-                pods[base] = None  # evita ciclos
+                pods[base] = None  # guards against cycles
                 pods[base] = load(dep_spec, fetch_source(dep_spec))
             deps.append(pods[base])
         return Pod(spec, root, deps)
@@ -328,9 +328,9 @@ def load_graph(local_spec, local_root):
 
 
 def write_package(pod, dest, deps_base="../", extra_deps=(), product=None):
-    """Package.swift para un pod. `dest/src` es un symlink a su código;
-    `deps_base` es la ruta (relativa a `dest`) donde están los paquetes de sus
-    dependencias."""
+    """Package.swift for a pod. `dest/src` is a symlink to its source;
+    `deps_base` is the path (relative to `dest`) holding its dependencies'
+    packages."""
     dest.mkdir(parents=True, exist_ok=True)
     link = dest / "src"
     if link.is_symlink() or link.exists():
@@ -340,14 +340,14 @@ def write_package(pod, dest, deps_base="../", extra_deps=(), product=None):
     sources = _files(pod.root, pod.spec, "source_files")
     bad = [f for f in sources if f.suffix in UNSUPPORTED_EXT]
     if bad:
-        sys.exit(f"error: el pod {pod.name} tiene Objective-C/C ({bad[0].name}); "
-                 "xlinux todavía solo convierte pods en Swift.")
+        sys.exit(f"error: pod {pod.name} contains Objective-C/C ({bad[0].name}); "
+                 "xlinux only converts Swift pods for now.")
     swift = [f for f in sources if f.suffix in SOURCE_EXT]
     if not swift:
-        sys.exit(f"error: el pod {pod.name} no tiene fuentes Swift que compilar")
-    # La carpeta del target solo tiene enlaces a sus fuentes: si apuntara al
-    # repo completo, SwiftPM tomaría como recursos los de las apps de ejemplo
-    # (los recursos del pod los empaqueta pack_resources, como CocoaPods).
+        sys.exit(f"error: pod {pod.name} has no Swift sources to compile")
+    # The target directory only holds links to its sources: if it pointed at
+    # the whole repo, SwiftPM would pick up the sample apps' resources (the
+    # pod's own resources are packaged by pack_resources, like CocoaPods).
     target_dir = dest / "Sources" / pod.module
     shutil.rmtree(dest / "Sources", ignore_errors=True)
     for f in swift:
@@ -360,7 +360,7 @@ def write_package(pod, dest, deps_base="../", extra_deps=(), product=None):
         if fw.suffix == ".xcframework":
             binaries.append((fw.stem, "src/" + fw.relative_to(pod.root).as_posix()))
         else:
-            log(f"aviso: {pod.name}: {fw.name} no es un .xcframework; se omite")
+            log(f"warning: {pod.name}: {fw.name} is not an .xcframework; skipping")
 
     defines = {"COCOAPODS"}
     xc = pod.spec.get("pod_target_xcconfig") or {}
@@ -383,7 +383,7 @@ def write_package(pod, dest, deps_base="../", extra_deps=(), product=None):
     product = product or pod.module
     binary_targets = "".join(f",\n        .binaryTarget(name: {q(n)}, path: {q(p)})" for n, p in binaries)
     (dest / "Package.swift").write_text(f"""// swift-tools-version: 5.9
-// Generado por xlinux desde el podspec de {pod.name} {pod.spec.get('version', '')}. No editar.
+// Generated by xlinux from the {pod.name} {pod.spec.get('version', '')} podspec. Do not edit.
 import PackageDescription
 
 let package = Package(
@@ -405,7 +405,7 @@ let package = Package(
 
 
 def resource_manifest(pods):
-    """[(bundle o None, [rutas])] de todos los pods, para empaquetar después."""
+    """[(bundle or None, [paths])] of every pod, to package later."""
     out = []
     for pod in pods:
         for bundle, patterns in (pod.spec.get("resource_bundles") or {}).items():
@@ -418,8 +418,8 @@ def resource_manifest(pods):
 
 
 def pack_resources(manifest, app):
-    """Arma los bundles de recursos como CocoaPods: `<bundle>.bundle` en la raíz
-    del .app (los .xcassets pasan por actool; .lproj conserva su carpeta)."""
+    """Assemble resource bundles like CocoaPods: `<bundle>.bundle` at the root
+    of the .app (.xcassets go through actool; .lproj keeps its directory)."""
     actool = config.SUPPORT / "core/bin/actool"
     for entry in manifest:
         target = app / f"{entry['bundle']}.bundle" if entry["bundle"] else app
@@ -428,7 +428,7 @@ def pack_resources(manifest, app):
             if f.suffix == ".xcassets":
                 run([actool, f, "--compile", target, "--platform", "iphoneos"], capture_output=True, text=True)
             elif f.suffix in (".storyboard", ".xib"):
-                log(f"aviso: {entry['pod']}: {f.name} necesita ibtool; se omite")
+                log(f"warning: {entry['pod']}: {f.name} needs ibtool; skipping")
             elif f.is_dir():
                 shutil.copytree(f, target / f.name, dirs_exist_ok=True)
             else:
