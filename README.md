@@ -269,10 +269,11 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   Sign in with Apple; xtool prefixes the bundle ID with `XTL-<team>.`. Don't
   delete the last app signed with your Apple ID, or iOS asks you to trust the
   developer again.
-- App Groups: entitlements files aren't applied yet, and xtool drops App Groups
-  on free Apple IDs anyway (on paid ones it renames them to
-  `group.XTL-<team>.<id>`). A widget that reads the app's data through
-  `UserDefaults(suiteName:)` installs and runs, but only sees its empty state.
+- App Groups: stock xtool drops them on free Apple IDs; with
+  `support/patches/xtool-free-app-groups.patch` they work (tested: a widget
+  reading the app's `UserDefaults(suiteName:)`). xtool renames groups to
+  `group.XTL-<team>.<id>`, so derive the group from the bundle ID instead of
+  hardcoding it.
 - Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
 

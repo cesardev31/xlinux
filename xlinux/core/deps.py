@@ -169,6 +169,7 @@ def ensure_xtool():
     data = config.data_dir()
     wrapper = data / "bin/xtool"
     if wrapper.exists():
+        write_xtool_wrapper(wrapper)
         return
     appimage = shutil.which("xtool")
     if not appimage:
@@ -180,10 +181,22 @@ def ensure_xtool():
     (data / "xtool").mkdir(parents=True, exist_ok=True)
     run([appimage, "--appimage-extract"], cwd=data / "xtool", capture_output=True, text=True)
     wrapper.parent.mkdir(parents=True, exist_ok=True)
-    wrapper.write_text('#!/bin/sh\n'
-                       '# xtool extracted from its AppImage: works without FUSE.\n'
-                       'exec "$(dirname "$(readlink -f "$0")")/../xtool/squashfs-root/AppRun" "$@"\n')
-    wrapper.chmod(0o755)
+    write_xtool_wrapper(wrapper)
+
+
+XTOOL_WRAPPER = """#!/bin/sh
+# xtool extracted from its AppImage: works without FUSE. If a build with
+# support/patches/xtool-free-app-groups.patch exists, it is used instead.
+dir="$(dirname "$(readlink -f "$0")")/../xtool"
+[ -x "$dir/xtool-patched" ] && exec "$dir/xtool-patched" "$@"
+exec "$dir/squashfs-root/AppRun" "$@"
+"""
+
+
+def write_xtool_wrapper(wrapper):
+    if not wrapper.exists() or wrapper.read_text() != XTOOL_WRAPPER:
+        wrapper.write_text(XTOOL_WRAPPER)
+        wrapper.chmod(0o755)
 
 
 def _find_xip():

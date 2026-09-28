@@ -22,3 +22,24 @@ swift build -c release --product OpenAppleMacrosServer
 cp .build/out/Products/Release-linux-x86_64/OpenAppleMacrosServer <data>/bin/
 xlinux setup   # installs it over xtool's (keeping the original as .orig)
 ```
+
+## xtool-free-app-groups.patch
+
+[xtool](https://github.com/xtool-org/xtool) (MIT, © Kabir Oberai) drops App
+Groups when signing with a free Apple ID (a `FIXME` in
+`DeveloperServicesCapability.swift`). The Xcode DeveloperServices API does let
+free teams register and assign them, as AltStore/SideStore do: with this
+one-line patch a widget and its app share `UserDefaults(suiteName:)` on a free
+account. xtool renames groups to `group.XTL-<team>.<id>`, so apps should derive
+the group from their bundle ID (`"group." + Bundle.main.bundleIdentifier`).
+
+Base: tag `1.20.1`. Needs `libssl-dev` and `libimobiledevice-dev`.
+
+```
+git clone --branch 1.20.1 https://github.com/xtool-org/xtool <data>/src/xtool
+cd <data>/src/xtool && git apply <repo>/support/patches/xtool-free-app-groups.patch
+swift build -c release --product xtool --scratch-path <data>/src/xtool-build
+mkdir -p <data>/xtool/patched
+cp <data>/src/xtool-build/out/Products/Release-linux-x86_64/{xtool,libXADI.so} <data>/xtool/patched/
+ln -sfn patched/xtool <data>/xtool/xtool-patched   # <data>/bin/xtool prefers it
+```
