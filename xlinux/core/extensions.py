@@ -85,7 +85,7 @@ def _info_plist(ext, app_info):
 
 
 def _fingerprint(ext, info, debug):
-    h = hashlib.sha256()
+    h = hashlib.sha256(Path(__file__).read_bytes())  # compile flags live in this file
     h.update(repr((sorted(info.items(), key=str), debug, config.MIN_IOS, str(config.IPHONE_SDK))).encode())
     for path in sorted(p for p in ext.dir.rglob("*") if p.is_file()):
         h.update(str(path.relative_to(ext.dir)).encode())
@@ -106,6 +106,10 @@ def _compile(ext, appex, debug):
     library = [] if any(p.name == "main.swift" for p in sources) else ["-parse-as-library"]
     toolchain.swiftc(["-Onone" if debug else "-O", "-module-name", module, *library,
                       "-application-extension", "-Xlinker", "-application_extension",
+                      # Like Xcode (and xtool): Foundation's NSExtensionMain sets up the
+                      # extension environment before the @main type runs; entering
+                      # through Swift's main traps in ExtensionFoundation.
+                      "-framework", "Foundation", "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                       "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../../Frameworks",
                       *sources, *toolchain.builtins(), "-o", appex / ext.name])
     appkit.copy_loose_resources(ext.dir, appex)
