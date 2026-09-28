@@ -232,6 +232,13 @@ anteriores. "iPhone", "iOS" y "Xcode" son marcas de Apple Inc.
 
 ### Licencia de xlinux
 
-Todavía **sin licencia** definida: por ahora es código publicado para verlo y
-aprender de él. Se elegirá una licencia abierta compatible con las piezas de
-arriba.
+Copyright (C) 2026 Cesar Andres Pereira.
+
+xlinux es software libre: puedes redistribuirlo y/o modificarlo bajo los términos
+de la **GNU General Public License versión 3** (o, a tu elección, cualquier
+versión posterior) publicada por la Free Software Foundation. Se distribuye con
+la esperanza de que sea útil, pero **sin ninguna garantía**. Ver [`LICENSE`](LICENSE).
+
+Los componentes de terceros listados arriba conservan sus propias licencias.
+`support/flutter/flutter_lldb_helper.py` deriva de Flutter (BSD-3-Clause) y
+mantiene su aviso; el parche de `support/patches/` aplica sobre OpenAppleMacros (MIT).
