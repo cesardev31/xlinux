@@ -39,6 +39,10 @@ def wait_for(pred, timeout=900):
         for msg in messages:
             if msg.get("event") == "app.start":
                 app_id = msg["params"]["appId"]
+            if msg.get("event") == "app.progress" and msg["params"].get("message"):
+                print(f"  {time.time() - t0:6.1f} s  {msg['params']['message']}", flush=True)
+            if msg.get("event") == "app.progress" and msg["params"].get("finished"):
+                print(f"  {time.time() - t0:6.1f} s  (fin de {msg['params'].get('progressId')})", flush=True)
             if pred(msg):
                 return msg
     raise SystemExit("timeout")

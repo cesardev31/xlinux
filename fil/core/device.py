@@ -68,7 +68,31 @@ def _xtool_install(ipa, udid):
     return "Successfully installed" in out, out
 
 
+def running_pids(bundle_id):
+    """PIDs de la app en el iPhone (DVT proclist, emparejando por la carpeta del .app)."""
+    try:
+        _, remote_app = installed_app(bundle_id)
+    except SystemExit:
+        return []
+    container = remote_app.removeprefix("/private").rsplit("/", 1)[0]
+    try:
+        procs = json.loads(pmd3("developer", "dvt", "proclist", check=False) or "[]")
+    except ValueError:
+        return []
+    return [p["pid"] for p in procs if str(p.get("realAppName", "")).startswith(container)]
+
+
+def terminate(bundle_id):
+    """Cierra las instancias vivas de la app. Una app de debug que quedó sin
+    debugger (congelada en una parada del JIT) traba al instalador de iOS."""
+    for pid in running_pids(bundle_id):
+        log(f"Cerrando la instancia anterior de la app (pid {pid})")
+        run(["pymobiledevice3", "developer", "dvt", "kill", str(pid)], capture_output=True, text=True, check=False)
+
+
 def install(ipa, udid=None):
+    ensure_developer_image()
+    terminate(_ipa_bundle_id(ipa))
     log("Firmando e instalando con xtool")
     ok, out = _xtool_install(ipa, udid)
     if ok:
@@ -243,7 +267,9 @@ class DebugSession:
             cmd += ["--forward", str(port)]
         self.bridge = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        text=True, env=config.tool_env())
-        self._wait_for(self.bridge, "BRIDGE_READY", 90, "el puente con el iPhone")
+        bridge_info = self._wait_for(self.bridge, "BRIDGE_READY", 90, "el puente con el iPhone")
+        debugserver = bridge_info.get("DEBUGSERVER", f"127.0.0.1:{debug_port}")
+        log(f"Túnel con el iPhone: {bridge_info.get('TUNNEL', '?')}")
 
         control = socket.create_connection(("127.0.0.1", control_port), timeout=90)
         control.sendall((json.dumps({"cmd": "launch", "bundle_id": real_id, "args": list(launch_args)}) + "\n").encode())
@@ -257,7 +283,7 @@ class DebugSession:
         env["FIL_STOP_FILE"] = self.stop_file
         env["FIL_ARGS"] = json.dumps({
             "helpers": self.lldb_helpers, "local_app": str(self.local_app), "pid": response["pid"],
-            "debugserver": f"127.0.0.1:{debug_port}", "remote_app": remote_app})
+            "debugserver": debugserver, "remote_app": remote_app})
         self.lldb = subprocess.Popen(
             ["lldb", "--batch", "-o", f"command script import {config.SUPPORT / 'core/lldb_driver.py'}"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
@@ -270,6 +296,8 @@ class DebugSession:
 
     @staticmethod
     def _wait_for(process, marker, timeout, what):
+        """Lee la salida hasta `marker`; devuelve las líneas CLAVE=valor vistas."""
+        info = {}
         deadline = time.time() + timeout
         while time.time() < deadline:
             line = process.stdout.readline()
@@ -277,8 +305,11 @@ class DebugSession:
                 sys.exit(f"error: {what} terminó antes de tiempo")
             if os.environ.get("FIL_VERBOSE"):
                 print(line.rstrip(), file=sys.stderr, flush=True)
+            key, sep, value = line.strip().partition("=")
+            if sep and key.isupper():
+                info[key] = value
             if marker in line:
-                return
+                return info
             if "[lldb] error" in line or "Traceback" in line:
                 print(line.rstrip(), file=sys.stderr)
         sys.exit(f"error: {what} no respondió en {timeout}s")
@@ -301,6 +332,9 @@ class DebugSession:
             self.bridge.terminate()
         if self.stop_file and os.path.exists(self.stop_file):
             os.unlink(self.stop_file)
+            # lldb no siempre logra matarla: sin debugger una app de debug queda
+            # congelada en la siguiente parada del JIT y traba la próxima instalación.
+            terminate(self.bundle_id)
 
     def run_until_parent_exits(self, launch_args, on_ready=None):
         """start() + wait(), limpiando si nos matan o si el proceso padre (la

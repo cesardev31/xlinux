@@ -89,6 +89,12 @@ flutter-ios-linux setup --data-dir /run/media/cesar/games/ios-dev
 flutter-ios-linux doctor
 ```
 
+Recomendado para depurar (debug mucho más rápido), en otra terminal:
+
+```
+sudo <datos>/uv-tools/pymobiledevice3/bin/pymobiledevice3 remote tunneld
+```
+
 `setup` extrae el AppImage de xtool (sin FUSE funciona desde el snap de Flutter),
 compila el shim de Darling y registra el iPhone en `~/.config/flutter/custom_devices.json`.
 
@@ -132,6 +138,13 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
   check-in de lockdown y lldb se cuelga.
 - lldb en modo **síncrono** tras adjuntarse: en asíncrono los callbacks del breakpoint
   `NOTIFY_DEBUGGER_ABOUT_RX_PAGES` no corren y la app queda en negro.
+- El helper JIT de Flutter escribe la región completa (hasta 512 KiB por parada) por el
+  protocolo del debugger; basta con tocar 8 bytes por página de 16 KiB (las páginas son
+  nuevas y valen cero): el primer hot reload bajó de 6,8 s a ~0,5 s.
+- Túnel de kernel (`sudo pymobiledevice3 remote tunneld`): si está corriendo, lldb habla
+  directo con debugserver; el túnel userspace (TCP en Python) a veces se atasca minutos.
+- Una app de debug que queda sin debugger se congela en la siguiente parada del JIT y
+  traba al instalador de iOS: antes de instalar se cierran sus instancias (DVT kill).
 - `target.memory-module-load-level minimal`: sin la caché compartida extraída
   (DeviceSupport de Xcode) lldb leería ~500 librerías desde la memoria del iPhone.
 
@@ -161,7 +174,8 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 
 - `actool` sin `Assets.car`: no hay colores ni datos del catálogo (`UIColor(named:)`,
   `NSDataAsset`), y se pierde el "template rendering" de los íconos.
-- Hot reload tarda más que en Mac (cada página JIT nueva hace una parada en lldb).
+- Debug arranca en ~1 min (compilar + instalar + adjuntar lldb); con `tunneld` el hot reload
+  tarda ~0,5 s. Sin `tunneld` funciona igual pero más lento.
 - Flutter solo acepta custom devices "linux": un hot restart envía el registrante de
   plugins Dart de Linux.
 - Cuenta gratis: el certificado dura 7 días, máximo 3 apps, sin push, Apple Pay ni
@@ -172,8 +186,7 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 ## Próximos pasos
 
 1. Native assets en release y cachear el build nativo entre corridas.
-2. Debug más rápido (túnel de kernel en vez del TCP userspace en Python; menos idas y vueltas por página JIT).
-3. Carpetas de SwiftPM separadas para debug/release (hoy no se pueden compilar a la vez).
-4. Plugins solo-CocoaPods (podspec → Package.swift).
-5. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
+2. Arranque de debug: evitar recompilar/reinstalar el nativo si no cambió.
+3. Plugins solo-CocoaPods (podspec → Package.swift).
+4. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
    (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).
