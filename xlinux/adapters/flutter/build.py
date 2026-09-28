@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from ...core import app as appkit
-from ...core import config, toolchain
+from ...core import config, extensions, toolchain
 from ...core.util import log, output, run
 from . import plugins
 
@@ -155,7 +155,7 @@ def compile_runner(project, flutter_fw_parent, obj, executable):
     if bridging.exists():
         args += ["-import-objc-header", bridging]
     args += sorted(runner.glob("*.swift")) + [SUPPORT / "FlutterLinuxSceneDelegate.swift"] + objects
-    args += ["-framework", "Flutter", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
+    args += [*toolchain.builtins(), "-framework", "Flutter", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
              "-o", executable]
     toolchain.swiftc(args)
 
@@ -207,6 +207,7 @@ def build(project_dir, debug=False, package=True):
     appkit.add_icons(project.ios / "Runner/Assets.xcassets/AppIcon.appiconset", project.app, info)
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
+    extensions.build_all(project.ios, project.app, project.build_dir, project.debug)
     toolchain.thin_frameworks(project.app)
     if package:
         appkit.package_ipa(project.app, project.ipa)

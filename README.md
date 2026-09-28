@@ -39,6 +39,7 @@ production Flutter apps.
 | Native assets (Dart build hooks, e.g. `objective_c`) in debug and release | ✅ |
 | Native plugins via SwiftPM: firebase_core, google_sign_in (Google login), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
 | CocoaPods-only plugins (podspec → SwiftPM conversion, no Ruby): Swift pods + xcframeworks, e.g. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ |
+| App extensions (e.g. WidgetKit widgets) from the Xcode project, Swift sources | ✅ |
 | Pods with Objective-C/C | ❌ |
 | Other frameworks (Expo / React Native) | 🔜 |
 
@@ -65,6 +66,7 @@ production Flutter apps.
 xlinux/core/               framework-agnostic
   toolchain.py             swiftc/clang/Swift Build for iOS, history-less git mirrors
   cocoapods.py             podspec → SwiftPM (no Ruby, no `pod install`)
+  extensions.py            app extensions (.appex) found in project.pbxproj
   app.py                   .app/.ipa without ibtool (Info.plist, icons, resources)
   darling.py               run macOS command-line tools
   device.py                detect, install, launch, capture; DebugSession (DVT + debugserver + lldb)
@@ -230,6 +232,12 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   sources only: pointing it at the whole repo makes SwiftPM pick up the sample
   apps' resources. Pods look for their bundles at the root of the .app
   (`Bundle.main`), not in SwiftPM bundles.
+- Swift's `#available` needs `__isPlatformVersionAtLeast` from compiler-rt;
+  Apple's clang links `libclang_rt.ios.a` implicitly, here it's passed explicitly
+  (it ships in the Xcode toolchain inside the SDK).
+- App extensions: each target whose Info.plist declares `NSExtension` is
+  compiled into `PlugIns/<Name>.appex`; xtool registers and signs every
+  `.appex` it finds there.
 - Only Mach-O MH_DYLIB binaries are embedded in `Frameworks/`: static
   xcframeworks (e.g. TensorFlowLiteC, MH_OBJECT) already live in the executable.
 - xtool's AppImage can't mount FUSE when launched from the Flutter snap → the
@@ -246,6 +254,11 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   Sign in with Apple; xtool prefixes the bundle ID with `XTL-<team>.`. Don't
   delete the last app signed with your Apple ID, or iOS asks you to trust the
   developer again.
+- App Groups: entitlements files aren't applied yet, and xtool drops App Groups
+  on free Apple IDs anyway (on paid ones it renames them to
+  `group.XTL-<team>.<id>`). A widget that reads the app's data through
+  `UserDefaults(suiteName:)` installs and runs, but only sees its empty state.
+- Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
 
 ## Roadmap

@@ -25,6 +25,14 @@ LINKER_FLAGS = ["-fuse-ld=lld", "-B", str(config.TOOLSET_BIN)]
 SWIFT_LINKER_FLAGS = ["-use-ld=lld", "-Xclang-linker", "-B", "-Xclang-linker", str(config.TOOLSET_BIN)]
 
 
+def builtins():
+    """Xcode's compiler-rt for iOS (`__isPlatformVersionAtLeast`, used by
+    Swift's `#available`). Apple's clang links it implicitly; ours doesn't
+    know where it is, so it is passed explicitly when linking."""
+    found = sorted(config.SWIFT_RESOURCES.parent.glob("clang/*/lib/darwin/libclang_rt.ios.a"))
+    return [str(found[-1])] if found else []
+
+
 def clang(args, **kw):
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
