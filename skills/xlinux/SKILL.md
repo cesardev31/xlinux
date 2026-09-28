@@ -19,6 +19,9 @@ plugging in/unlocking the iPhone, or enabling Developer Mode).
   user to run it in a terminal; it stays attached.
 - Release: `xlinux run --project <dir>` (build, install, launch, logs).
 - Build only: `xlinux build [--debug] [--install] --project <dir>`.
+- Expo / React Native: `xlinux run` from the project (debug build, installs,
+  launches and starts Metro; the dev launcher connects to the printed URL).
+  The first build takes ~20-30 min; later builds only rebuild what changed.
 
 The first build of an app with native plugins can take several minutes
 (SwiftPM fetches dependencies); later builds are cached.

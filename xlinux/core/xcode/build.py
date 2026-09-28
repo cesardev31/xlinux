@@ -40,6 +40,15 @@ class BuildError(Exception):
     pass
 
 
+def copy(src, dest):
+    """Copy contents only: CocoaPods checkouts are read-only, and copying their
+    permissions would make the next build fail to overwrite."""
+    dest = Path(dest)
+    if dest.exists() or dest.is_symlink():
+        dest.unlink()
+    shutil.copyfile(src, dest)
+
+
 def run(cmd):
     cmd = [str(c) for c in cmd if c != ""]
     if os.environ.get("XLINUX_VERBOSE"):
@@ -235,7 +244,7 @@ class TargetBuild:
              *self.swift_flags(), "-c", *files, "-o", obj])
         if header.parent != self.derived:  # `#import "Module-Swift.h"` inside the target
             self.derived.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(header, self.derived / header.name)
+            copy(header, self.derived / header.name)
         if self.is_framework:
             mm = self.fw / "Modules/module.modulemap"
             if mm.exists() and f"{self.module}.Swift" not in mm.read_text():
@@ -251,11 +260,11 @@ class TargetBuild:
         (self.fw / "Headers").mkdir(parents=True, exist_ok=True)
         for h in self.t.get("headers", []):
             if h["visibility"] == "public":
-                shutil.copy2(h["path"], self.fw / "Headers" / Path(h["path"]).name)
+                copy(h["path"], self.fw / "Headers" / Path(h["path"]).name)
         modulemap = self.s.get("MODULEMAP_FILE")
         if modulemap:
             (self.fw / "Modules").mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(self.path(modulemap), self.fw / "Modules/module.modulemap")
+            copy(self.path(modulemap), self.fw / "Modules/module.modulemap")
 
     def run_compatibility_header_script(self):
         """CocoaPods' script for static libraries with Swift: module map, umbrella
@@ -273,9 +282,9 @@ class TargetBuild:
     def fingerprint(self, dependencies):
         h = hashlib.sha256(BUILDER.encode())
         langs = {LANGUAGES.get(Path(src["path"]).suffix) for src in self.sources} - {None}
-        h.update(json.dumps({lang: self.clang_flags(lang) for lang in sorted(langs)}).encode())
+        h.update(json.dumps({lang: self.clang_flags(lang) for lang in sorted(langs)}, default=str).encode())
         if any(src["path"].endswith(".swift") for src in self.sources):
-            h.update(json.dumps(self.swift_flags()).encode())
+            h.update(json.dumps(self.swift_flags(), default=str).encode())
         for item in self.sources + self.t.get("headers", []):
             st = os.stat(item["path"])
             h.update(f"{item['path']}|{item.get('flags')}|{st.st_mtime_ns}|{st.st_size}".encode())

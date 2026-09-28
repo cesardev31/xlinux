@@ -46,3 +46,19 @@ mkdir -p <data>/xtool/patched
 cp <data>/src/xtool-build/out/Products/Release-linux-x86_64/{xtool,libXADI.so} <data>/xtool/patched/
 ln -sfn patched/xtool <data>/xtool/xtool-patched   # <data>/bin/xtool prefers it
 ```
+
+## expo-modules-jsi-swift-6.4.patch
+
+[expo-modules-jsi](https://github.com/expo/expo) (MIT, © 650 Industries) is
+the one Expo module built at build time instead of shipping prebuilt. Swift
+6.4 rejects two constructs Xcode 27's Swift accepts: a C function pointer
+formed inside a ternary (`set == nil ? nil : setter`), and a `public` member
+in an extension of a C++ type in a library-evolution module
+(`extension expo.CppError: Error { public var message }`). The patch splits
+the ternary into two calls and makes `message` internal (only the module
+itself uses it); the ABI the prebuilt ExpoModulesCore links against is
+unchanged (all 156 symbols it imports are still exported).
+
+`xlinux` applies it to a copy of the package in the data directory
+(`xlinux/adapters/expo/jsi.py`); node_modules is only written to where Expo's
+own build script writes (`apple/Products/ExpoModulesJSI.xcframework`).

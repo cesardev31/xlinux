@@ -63,6 +63,13 @@ def actool(catalog, dest, app_icon=None, partial=None):
         raise BuildError(f"actool failed for {catalog}:\n{result.stderr[-2000:]}")
 
 
+def writable(path):
+    """CocoaPods checkouts are read-only; copies must stay replaceable."""
+    for p in [Path(path), *Path(path).rglob("*")] if Path(path).is_dir() else [Path(path)]:
+        if not p.is_symlink():
+            p.chmod(p.stat().st_mode | 0o200)
+
+
 def copy_resource(src, dest):
     src = Path(src)
     if src.suffix == ".xcassets":
@@ -71,8 +78,9 @@ def copy_resource(src, dest):
         log(f"warning: {src.name} skipped (no ibtool on Linux)")
     elif src.is_dir():
         shutil.copytree(src, dest / src.name, dirs_exist_ok=True)
+        writable(dest / src.name)
     elif src.exists():
-        shutil.copy2(src, dest / src.name)
+        shutil.copyfile(src, dest / src.name)
 
 
 def build_resource_bundles(pods):
@@ -126,6 +134,7 @@ def assemble(app_project, pods, target_name, app_dir):
         src = Path(pods_settings.expand(fw)).resolve()
         shutil.copytree(src, frameworks / src.name, symlinks=False,
                         ignore=lambda _, names: [n for n in names if n in NOT_EMBEDDED or n.endswith(".dSYM")])
+        writable(frameworks / src.name)
     for resource in script_entries(support / f"Pods-{target_name}-resources.sh", "install_resource", configuration):
         copy_resource(pods_settings.expand(resource), app_dir)
 

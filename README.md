@@ -2,10 +2,12 @@
 
 Build, install and debug apps on a real iPhone **from Linux, no Mac required**.
 
-Today it supports **Flutter**: release builds, debug with hot reload, the
-iPhone as a device in VS Code / `flutter run`, and real native plugins
-(Firebase, Stripe, Google Sign-In, WebView…). The core is framework-agnostic,
-so more adapters can be added (Expo / React Native is the next candidate).
+It supports **Flutter** (release builds, debug with hot reload, the iPhone as
+a device in VS Code / `flutter run`, real native plugins: Firebase, Stripe,
+Google Sign-In, WebView…) and **Expo / React Native** (debug builds with
+`expo-dev-client`, JavaScript served by Metro; the whole CocoaPods project,
+React Native, Reanimated, Expo modules and Google Sign-In compiled on Linux).
+The core is framework-agnostic.
 
 It does not reimplement Xcode. It glues together open-source pieces that
 already existed (xtool, Darling, pymobiledevice3, LLVM/Swift, OpenAppleMacros…)
@@ -13,7 +15,8 @@ and fills the gaps where they didn't fit. Credits are [at the end](#credits-and-
 
 ```
 flutter run -d iphone-linux        # debug + hot reload (or pick the iPhone in VS Code)
-xlinux run                         # release: build, install, launch and stream logs
+xlinux run                         # Flutter: release build, install, launch, logs
+                                   # Expo: debug build, install, launch, Metro
 xlinux build [--debug] [--install] [--project DIR]
 xlinux doctor                      # diagnostics
 xlinux setup                       # prepare the environment (once)
@@ -40,8 +43,9 @@ production Flutter apps.
 | Native plugins via SwiftPM: firebase_core, google_sign_in (Google login), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
 | CocoaPods-only plugins (podspec → SwiftPM conversion, no Ruby): Swift pods + xcframeworks, e.g. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ |
 | App extensions (e.g. WidgetKit widgets) from the Xcode project, Swift sources | ✅ |
-| Pods with Objective-C/C | ❌ |
-| Other frameworks (Expo / React Native) | 🔜 |
+| Pods with Objective-C/C (Flutter's podspec → SwiftPM conversion) | ❌ |
+| Expo / React Native, debug (expo-dev-client + Metro): `pod install`, 49 pods incl. React Native, Reanimated, Screens, Expo modules, Google Sign-In; tested with Expo 56 / RN 0.85 | ✅ |
+| Expo / React Native release (JavaScript bundled in the app) | 🔜 |
 
 ## How it works
 
@@ -59,6 +63,10 @@ production Flutter apps.
 | signing and installing | **xtool** (free or paid Apple ID) |
 | debugging (Dart's JIT needs a debugger) | **pymobiledevice3** (kernel `tunneld` tunnel, or userspace without sudo) + `support/core/device_bridge.py` + lldb with `support/core/lldb_driver.py` and Flutter's JIT helper |
 | the device in VS Code | a Flutter *custom device* (`xlinux/adapters/flutter/custom_device.py`) |
+| `pod install` for React Native / Expo | the real **CocoaPods**, on Homebrew's portable Ruby in the data directory, with stand-ins for the macOS tools pod scripts call (`support/core/cocoapods/`) |
+| Xcode building `Pods.xcodeproj` and the app target | `xlinux/core/xcode/`: reads the project with CocoaPods' `xcodeproj` gem, resolves build settings the way Xcode layers them (xcconfigs, `$(inherited)`, conditional keys) and compiles each target with clang/swiftc, cached per target |
+| `ExpoModulesJSI`'s xcodebuild script phase | SwiftPM for iOS + a small patch for Swift 6.4 (`support/patches/`), relinked and assembled like its own script does |
+| Expo's Swift macro plugin (macOS binary on npm) | built from its sources for Linux, once per version |
 
 ## Architecture
 
@@ -72,16 +80,26 @@ xlinux/core/               framework-agnostic
   device.py                detect, install, launch, capture; DebugSession (DVT + debugserver + lldb)
   setup.py                 shared setup/doctor
   config.py                paths and environment (works without sourcing any env.sh)
+  xcode/                   Xcode projects without Xcode (CocoaPods-based apps):
+    settings.py            xcconfig files and layered build settings
+    project.py             targets and settings (reads the project with CocoaPods' xcodeproj gem)
+    build.py               compiles targets (cached), prebuilt React Native rules
+    package.py             links the app and assembles the .app
 xlinux/adapters/flutter/   everything Flutter-specific
   build.py                 flutter assemble, Runner, .app
   plugins.py               native plugins via SwiftPM (like `flutter build ios` on macOS)
   debug.py                 JIT helper + VM Service for `flutter run`/`attach`
   custom_device.py         the iPhone in `flutter devices` and VS Code
+xlinux/adapters/expo/      Expo / React Native
+  build.py                 expo prebuild, pod install, pods + app, .app
+  jsi.py                   ExpoModulesJSI (the one Expo module built from source)
+  macros.py                Expo's Swift macro plugin for Linux
 xlinux/mcp_server.py       MCP server (screenshots, touches, text, buttons, apps, hot reload, logs)
-support/core/              device_bridge.py, lldb_driver.py, darling_compat.c
+support/core/              device_bridge.py, lldb_driver.py, darling_compat.c, xcodeproj_dump.rb
+support/core/cocoapods/    CocoaPods on Linux: plist patch + stand-ins (xcodebuild, clang, ditto…)
 support/core/bin/          xcrun, actool, apple-clang, lipo, otool, install_name_tool, codesign
 support/flutter/           FlutterLinuxSceneDelegate.swift, flutter_lldb_helper.py
-support/patches/           patches to third-party projects (OpenAppleMacros)
+support/patches/           patches to third-party projects (OpenAppleMacros, xtool, expo-modules-jsi)
 tools/bench_debug.py       measures startup and hot reload the way VS Code drives them
 ```
 
@@ -124,6 +142,8 @@ Installed automatically the first time they're needed (or all at once with
 | OpenAppleMacros with UIKit `#Preview` (`support/patches/`) | first plugin that uses it (e.g. Stripe) |
 | MCP SDK + Pillow | first `xlinux mcp` |
 | Flutter's iOS engine | first build |
+| Ruby (Homebrew's portable build) + CocoaPods | first Expo / React Native build |
+| Expo's Swift macro plugin | first Expo build (per plugin version, a few minutes) |
 
 From a git checkout, `bin/xlinux` works the same way. To publish a release
 (no CI needed): bump `__version__` in `xlinux/__init__.py`, commit and run
@@ -138,6 +158,25 @@ sudo <data>/uv-tools/pymobiledevice3/bin/pymobiledevice3 remote tunneld
 
 On the iPhone: enable Developer Mode and trust your Apple ID (Settings →
 General → VPN & Device Management).
+
+## Expo / React Native
+
+From the project folder (with `node_modules` installed):
+
+```
+xlinux run            # debug build, install, launch the app and start Metro
+xlinux build --debug  # just build (add --install to install)
+```
+
+It does what `expo run:ios` does on a Mac: `expo prebuild` generates `ios/`
+(again when `app.json` or `package.json` change), `pod install` fills
+`ios/Pods`, and every pod plus the app target is compiled; build products go to
+the data directory. The first build takes a while (≈20-30 min for a
+medium-sized app: it also builds `ExpoModulesJSI` and Expo's macro plugin);
+after that only changed targets are rebuilt. The app uses `expo-dev-client`:
+open it, pick the Metro server `xlinux run` prints (or type its URL) with the
+iPhone on the same network as the computer, and JavaScript changes reload
+live.
 
 ## Seeing and controlling the iPhone
 
@@ -258,6 +297,27 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
 - xtool's AppImage can't mount FUSE when launched from the Flutter snap → the
   extracted copy is used.
 
+**React Native / Expo on Linux**
+- React Native ships prebuilt (`React.xcframework`), but its headers are
+  reachable twice: as sources under `Pods/Headers` and inside the xcframework
+  through a VFS overlay. Only the xcframework copy is kept on the search path.
+- Clang assigns a header to a module by the folder it was found in, and the
+  overlay's virtual folders don't match React's module map: a header pulled
+  into one module hides its declarations and macros from the next. Objective-C++
+  and C++ are compiled without Clang modules (C/Objective-C and Swift keep them).
+- Build settings as Xcode reads them: `KEY[config=*Debug*] = $(inherited) …`
+  builds on the plain `KEY` of the same file; some pod scripts store lists as
+  stringified Ruby arrays; per-file `-x objective-c++` on `.m` files; the
+  `-Swift.h` header is also searched in the target's DerivedSources.
+- Object files must be unique per path (a target can have four `ShadowNodes.cpp`).
+- `ExpoModulesJSI`: SwiftPM's dynamic library comes out empty (its objects are
+  archives), so it's relinked with `-force_load`; `swift/bridging` comes from
+  the Swift toolchain (xtool's SDK doesn't ship `usr/include`).
+- CocoaPods on Linux needs `xcodebuild -version`, an executable `command`, a
+  `clang` that targets iOS for `prepare_command` stubs, binary plists read
+  through Python, and `TAR_OPTIONS=--warning=no-unknown-keyword` (GNU tar's
+  warnings about Apple's xattrs otherwise end up inside extracted files).
+
 ## Known limitations
 
 - `actool` without `Assets.car`: no catalog colors or data (`UIColor(named:)`,
@@ -276,15 +336,18 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   hardcoding it.
 - Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
+- Expo: debug only for now (release needs the JavaScript bundle and Hermes
+  bytecode embedded); single-image app icons (Expo's 1024 px `AppIcon`) aren't
+  converted yet; the launch storyboard becomes a plain `UILaunchScreen`;
+  `pod install` writes `ios/Pods` (~1 GB) inside the project, as on a Mac.
 
 ## Roadmap
 
 1. Dart changes without reinstalling (push the kernel into the app's container
    and launch with `--flutter-assets-dir`).
 2. Objective-C/C pods in the CocoaPods conversion.
-3. Expo / React Native adapter: `expo prebuild` + CocoaPods; debugging is simpler
-   (Hermes has no JIT, Metro over the network), building is harder
-   (Pods.xcodeproj).
+3. Expo / React Native: release builds (embedded bundle), app icon from a single
+   1024 px image, upstreaming the `expo-modules-jsi` patch.
 
 ## Credits and licenses
 
@@ -307,6 +370,10 @@ are **used** (installed separately; not redistributed here except where noted):
 | [uv](https://github.com/astral-sh/uv) | Astral | MIT / Apache-2.0 | installing the Python tools |
 | [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Anthropic and contributors | MIT | MCP server |
 | [Pillow](https://github.com/python-pillow/Pillow) | Jeffrey A. Clark and contributors | MIT-CMU | downscaling MCP screenshots |
+| [CocoaPods](https://github.com/CocoaPods/CocoaPods) (incl. [Xcodeproj](https://github.com/CocoaPods/Xcodeproj)) | The CocoaPods contributors | MIT | `pod install` and reading Xcode projects for React Native / Expo |
+| [Portable Ruby](https://github.com/Homebrew/homebrew-portable-ruby) | Homebrew / Ruby core team | BSD-2-Clause (Ruby: Ruby license / BSD-2-Clause) | running CocoaPods without a system Ruby |
+| [Expo](https://github.com/expo/expo) | 650 Industries | MIT | Expo modules and tooling; **our patch** to `expo-modules-jsi` in `support/patches/`; its Swift macro plugin built for Linux |
+| [React Native](https://github.com/facebook/react-native), [Hermes](https://github.com/facebook/hermes) | Meta Platforms and contributors | MIT | the prebuilt React Native and Hermes frameworks apps link against |
 
 **Apple SDK:** the iOS SDK comes from `Xcode.xip`, which you download yourself
 from developer.apple.com with your Apple ID after accepting its license; xlinux

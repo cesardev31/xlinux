@@ -5,7 +5,8 @@ Guidance for AI coding agents working **on** xlinux or **with** it.
 ## What xlinux is
 
 A CLI that builds, installs and debugs iOS apps on a real iPhone from Linux
-(no Mac). Flutter is the first supported framework. It glues together xtool,
+(no Mac). Supported: Flutter, and Expo / React Native (debug builds with
+expo-dev-client + Metro). It glues together xtool,
 Darling, pymobiledevice3, Swift/LLVM and Flutter's own tooling; see README.md.
 
 ## Using xlinux in an app project
@@ -30,8 +31,9 @@ xlinux mcp                            # MCP server (stdio) to see and drive the 
 
 ## Working on the xlinux code
 
-- `xlinux/core/` is framework-agnostic; anything Flutter-specific goes in
-  `xlinux/adapters/flutter/`. `support/` holds files shipped into builds or run
+- `xlinux/core/` is framework-agnostic; anything Flutter- or Expo-specific goes
+  in `xlinux/adapters/<framework>/`. `xlinux/core/xcode/` builds CocoaPods-based
+  Xcode projects (settings, targets, link, .app) and is shared. `support/` holds files shipped into builds or run
   on the device side (lldb driver, xcrun/actool stand-ins, Darling shim).
 - Pure Python 3 stdlib in the CLI; the MCP server runs on pymobiledevice3's
   interpreter (it needs `mcp` and `pillow`).
