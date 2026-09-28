@@ -105,11 +105,11 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
             run(["swift", "package", "--package-path", package, "--config-path", config_path,
                  "config", "set-mirror", "--original", url, "--mirror", str(mirror)],
                 capture_output=True, text=True)
-    if not (config.data_dir() / "bin/OpenAppleMacrosServer").exists():
+    if not deps.macro_server_current():
         # Dependencies are fetched first to know whether they need the patched macro server.
         run(["swift", "package", "resolve", "--package-path", package, "--scratch-path", scratch,
              "--config-path", config_path, "--cache-path", config.data_dir() / "swiftpm-cache"], cwd=package)
-        if deps.needs_uikit_preview([package, scratch / "checkouts"]):
+        if deps.needs_patched_macros([package, scratch / "checkouts"]):
             deps.ensure_macro_server()
     # Swift 6.4 uses Swift Build by default; configure it the way xtool does
     # (PackLib/BuildSettings.swift): triple + toolset-swb.json + SDK platforms.

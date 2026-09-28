@@ -7,8 +7,11 @@
 [xtool](https://github.com/xtool-org/xtool) uses as the SDK's
 `swift-plugin-server`. It lacks the UIKit variants of `#Preview`
 (`KitViewMacro`, `Common`, `PreviewCommonGroup`), used e.g. by Stripe. The
-patch adds empty stubs (like the existing `SwiftUIView` one: previews are only
-meaningful inside Xcode).
+patch adds empty stubs for them and for `SwiftUIViewGroup_1` (SwiftUI
+`#Preview(arguments:)`), like the existing `SwiftUIView` one: previews are only
+meaningful inside Xcode. Submitted upstream as
+[xtool-org/OpenAppleMacros#5](https://github.com/xtool-org/OpenAppleMacros/pull/5);
+once xtool ships it, this patch and `deps.ensure_macro_server()` can go.
 
 `xlinux` builds and installs it by itself the first time a plugin needs it
 (`xlinux/core/deps.py`); by hand:

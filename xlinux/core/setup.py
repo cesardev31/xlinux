@@ -77,8 +77,8 @@ def doctor(adapters):
     _check(bool(which("darling")) and config.compat_shim().exists(), "Darling (release builds)",
            later, optional=True)
     _check((data / "py-tools/bin/python").exists(), "cairosvg (SVG assets)", later, optional=True)
-    _check((data / "bin/OpenAppleMacrosServer").exists(), "OpenAppleMacros with UIKit #Preview",
-           later + " (plugins such as Stripe)", optional=True)
+    _check(deps.macro_server_current(), "OpenAppleMacros with UIKit/WidgetKit #Preview",
+           later + " (e.g. Stripe, widgets with #Preview)", optional=True)
 
     for adapter in adapters:
         print(f"\n{adapter.NAME}:")

@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 
 from . import app as appkit
-from . import config, toolchain
+from . import config, deps, toolchain
 from .util import log
 
 
@@ -92,6 +92,8 @@ def _compile(ext, appex, debug):
     sources = ext.sources()
     if not sources:
         raise SystemExit(f"error: extension {ext.name} has no Swift sources in {ext.dir}")
+    if not deps.macro_server_current() and deps.needs_patched_macros([ext.dir]):
+        deps.ensure_macro_server()  # e.g. a widget's #Preview(as: .systemSmall)
     if any(p.suffix in (".m", ".mm", ".c") for p in ext.dir.rglob("*")):
         log(f"warning: {ext.name}: only Swift sources are compiled for extensions")
     module = re.sub(r"\W", "_", ext.name)

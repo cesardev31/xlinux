@@ -7,6 +7,7 @@ assets, the patched macro server for UIKit `#Preview`, the MCP SDK for
 `xlinux mcp`). Only system packages need sudo, asked for once per batch.
 """
 
+import hashlib
 import json
 import os
 import platform
@@ -343,9 +344,15 @@ def ensure_rcodesign():
     return str(target)
 
 
-def needs_uikit_preview(dirs):
-    """Whether any Swift source under `dirs` uses `#Preview` from UIKit, which
-    xtool's OpenAppleMacros doesn't implement (e.g. Stripe)."""
+MACROS_PATCH = config.SUPPORT / "patches/OpenAppleMacros-preview-uikit.patch"
+# xtool's OpenAppleMacros only implements SwiftUI's plain `#Preview { }`: the
+# UIKit/AppKit, WidgetKit and `arguments:` variants need the patched server.
+PREVIEW_IMPORTS = ("import UIKit", "import AppKit", "import WidgetKit")
+
+
+def needs_patched_macros(dirs):
+    """Whether any Swift source under `dirs` uses a `#Preview` variant that
+    xtool's OpenAppleMacros doesn't implement (e.g. Stripe, widgets)."""
     for directory in dirs:
         for root, _, files in os.walk(directory, followlinks=True):
             for name in files:
@@ -355,16 +362,26 @@ def needs_uikit_preview(dirs):
                     text = (Path(root) / name).read_text(errors="ignore")
                 except OSError:
                     continue
-                if "#Preview" in text and "import UIKit" in text:
+                if "#Preview" in text and ("arguments:" in text or any(i in text for i in PREVIEW_IMPORTS)):
                     return True
     return False
 
 
+def macro_server_current():
+    """Whether <data>/bin/OpenAppleMacrosServer was built from the current patch."""
+    stamp = config.data_dir() / "bin/OpenAppleMacrosServer.patch-sha256"
+    try:
+        return stamp.read_text().strip() == hashlib.sha256(MACROS_PATCH.read_bytes()).hexdigest()
+    except OSError:
+        return False
+
+
 def ensure_macro_server():
     """Build OpenAppleMacros with support/patches/OpenAppleMacros-preview-uikit.patch
-    into <data>/bin/OpenAppleMacrosServer and install it into the SDK."""
+    into <data>/bin/OpenAppleMacrosServer and install it into the SDK. Rebuilt
+    when the patch changes."""
     data = config.data_dir()
-    if not (data / "bin/OpenAppleMacrosServer").exists():
+    if not macro_server_current():
         url, commit = OPEN_APPLE_MACROS
         src = data / "src/OpenAppleMacros"
         log("Building OpenAppleMacros with UIKit #Preview support (once, a few minutes)")
@@ -372,7 +389,7 @@ def ensure_macro_server():
             run(["git", "clone", "-q", url, src])
         run(["git", "-C", src, "checkout", "-q", "-f", commit])
         run(["git", "-C", src, "clean", "-q", "-fd"])
-        run(["git", "-C", src, "apply", config.SUPPORT / "patches/OpenAppleMacros-preview-uikit.patch"])
+        run(["git", "-C", src, "apply", MACROS_PATCH])
         # A plain Linux build: without our iOS xcrun/clang stand-ins in PATH.
         env = os.environ.copy()
         env["PATH"] = f"{config.swift_bin()}:{env.get('PATH', '')}"
@@ -381,5 +398,7 @@ def ensure_macro_server():
         bin_path = Path(output([*build, "--show-bin-path"], env=env).strip())
         (data / "bin").mkdir(parents=True, exist_ok=True)
         shutil.copy2(bin_path / "OpenAppleMacrosServer", data / "bin/OpenAppleMacrosServer")
+        (data / "bin/OpenAppleMacrosServer.patch-sha256").write_text(
+            hashlib.sha256(MACROS_PATCH.read_bytes()).hexdigest() + "\n")
         run(["git", "-C", src, "checkout", "-q", "-f", commit])
     install_macro_server()
