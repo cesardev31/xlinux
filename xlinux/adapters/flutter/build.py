@@ -160,8 +160,9 @@ def compile_runner(project, flutter_fw_parent, obj, executable):
     toolchain.swiftc(args)
 
 
-def build(project_dir, debug=False):
-    """Compila la app y devuelve el Project con Runner.app y el .ipa listos."""
+def build(project_dir, debug=False, package=True):
+    """Compila la app y devuelve el Project con Runner.app (y el .ipa si
+    `package`; para instalar en el iPhone basta el .app, sin comprimir)."""
     config.require_data_dir()
     toolchain.require_sdk()
     project = Project(project_dir, debug)
@@ -206,6 +207,7 @@ def build(project_dir, debug=False):
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
     toolchain.thin_frameworks(project.app)
-    appkit.package_ipa(project.app, project.ipa)
-    log(f"Listo: {project.ipa}")
+    if package:
+        appkit.package_ipa(project.app, project.ipa)
+    log(f"Listo: {project.ipa if package else project.app}")
     return project

@@ -13,6 +13,7 @@ SwiftPM hace de "resolvedor": descarga y compila las dependencias de cada
 plugin (Firebase, Stripe, GoogleSignIn...), incluidos xcframeworks binarios.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -190,7 +191,18 @@ def build(project, flutter_fw_parent):
     spm_dir = project.dir / f"build/ios-linux-spm-{mode}"
     plugins = generate(project, spm_dir)
     pkg = generate_runner(project, spm_dir)
-    log(f"Runner + plugins con SwiftPM ({', '.join(n for n, _, _ in plugins)})")
+    names = ", ".join(n for n, _, _ in plugins)
+    fingerprint = native_fingerprint(project, spm_dir, plugins, flutter_fw_parent)
+    stamp = spm_dir / "native.json"
+    try:
+        previous = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    if previous.get("fingerprint") == fingerprint and (Path(previous.get("out", "")) / "Runner").exists():
+        log(f"Runner + plugins sin cambios nativos: se reutiliza la compilación ({names})")
+        return Path(previous["out"])
+
+    log(f"Runner + plugins con SwiftPM ({names})")
     # Los plugins hacen `import Flutter`: en Xcode Flutter.framework llega por
     # FRAMEWORK_SEARCH_PATHS, aquí por -F en todos los targets.
     fw = str(flutter_fw_parent)
@@ -200,4 +212,30 @@ def build(project, flutter_fw_parent):
         "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter"])
     if not (out / "Runner").exists():
         sys.exit(f"error: SwiftPM no produjo {out / 'Runner'}")
+    stamp.write_text(json.dumps({"fingerprint": fingerprint, "out": str(out)}))
     return out
+
+
+def native_fingerprint(project, spm_dir, plugins, flutter_fw_parent):
+    """Huella de todo lo que afecta la compilación nativa: el código generado
+    (Runner, registrante, Package.swift), los plugins y sus versiones, el
+    engine, el modo y las propias herramientas de xlinux. Si no cambia, el
+    `swift build` (que en una app con Firebase/Stripe tarda ~30 s aun sin
+    cambios) se puede saltar."""
+    h = hashlib.sha256()
+    h.update(f"{project.debug}|{flutter_fw_parent}".encode())
+    for name, basename, package in plugins:
+        h.update(f"{name}|{basename}|{package}".encode())
+        # Un plugin en desarrollo (path:) puede cambiar sin cambiar de versión.
+        for f in sorted(package.rglob("*")):
+            if f.is_file() and f.suffix in (".swift", ".m", ".mm", ".h", ".c", ".cpp") or f.name == "Package.swift":
+                h.update(str(f).encode())
+                h.update(str(f.stat().st_mtime_ns).encode())
+    generated = [spm_dir / "Runner/Package.swift", *sorted((spm_dir / "Runner/Sources").rglob("*")),
+                 *sorted((spm_dir / "Packages").glob("*/Package.swift"))]
+    tools = [Path(__file__), Path(toolchain.__file__), config.SUPPORT / "core/bin/actool"]
+    for f in generated + tools:
+        if f.is_file():
+            h.update(str(f.relative_to(spm_dir) if f.is_relative_to(spm_dir) else f).encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()

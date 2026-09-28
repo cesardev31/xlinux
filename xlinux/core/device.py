@@ -1,6 +1,7 @@
 """Todo lo que habla con el iPhone: detectar, instalar, lanzar y depurar."""
 
 import base64
+import hashlib
 import json
 import os
 import plistlib
@@ -52,10 +53,32 @@ def ensure_developer_image():
 INSTALL_TIMEOUT = 240
 
 
-def _ipa_bundle_id(ipa):
-    with zipfile.ZipFile(ipa) as z:
+def _ipa_bundle_id(path):
+    """Bundle ID de un .ipa o de una carpeta .app."""
+    path = Path(path)
+    if path.is_dir():
+        return plistlib.loads((path / "Info.plist").read_bytes())["CFBundleIdentifier"]
+    with zipfile.ZipFile(path) as z:
         name = next(n for n in z.namelist() if n.count("/") == 2 and n.endswith(".app/Info.plist"))
         return plistlib.loads(z.read(name))["CFBundleIdentifier"]
+
+
+# Con cuenta gratis el certificado dura 7 días: pasado este margen se reinstala
+# (y xtool vuelve a firmar) aunque la app no haya cambiado.
+REINSTALL_AFTER = 5 * 24 * 3600
+
+
+def _content_hash(path):
+    """Huella del contenido de un .app (o .ipa), para no reinstalar lo mismo."""
+    path = Path(path)
+    h = hashlib.sha256()
+    files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
+    for f in files:
+        h.update(str(f.relative_to(path) if path.is_dir() else f.name).encode())
+        with open(f, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()
 
 
 def _xtool_install(ipa, udid):
@@ -91,17 +114,39 @@ def terminate(bundle_id):
 
 
 def install(ipa, udid=None):
+    """Instala un .ipa o una carpeta .app (xtool acepta ambos; el .app evita
+    comprimir). Si es idéntica a la última instalada en este iPhone y sigue
+    ahí, no se reinstala."""
+    ipa = Path(ipa)
+    bundle_id = _ipa_bundle_id(ipa)
+    # Uno por iPhone y app (no por carpeta de build): instalar release y luego
+    # debug (o al revés) tiene que reinstalar aunque cada build no haya cambiado.
+    stamp = config.data_dir() / "installed" / (udid or "default") / f"{bundle_id}.json"
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    digest = _content_hash(ipa)
+    try:
+        last = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        last = {}
+    if (last.get("hash") == digest and last.get("udid") == udid
+            and time.time() - last.get("time", 0) < REINSTALL_AFTER):
+        try:
+            installed_app(bundle_id)
+            log("La app no cambió desde la última instalación: no se reinstala")
+            return
+        except SystemExit:
+            pass  # ya no está en el iPhone: instalar
     ensure_developer_image()
-    terminate(_ipa_bundle_id(ipa))
+    terminate(bundle_id)
     log("Firmando e instalando con xtool")
     ok, out = _xtool_install(ipa, udid)
     if ok:
+        stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
         return
     if out == "timeout":
         # Visto en la práctica: si una instalación se corta a la mitad, iOS queda
         # trabado con ese bundle ID y xtool espera para siempre al subir la app.
         # Desinstalarla (solo esa; se pierden sus datos locales) lo destraba.
-        bundle_id = _ipa_bundle_id(ipa)
         log(f"La instalación se trabó; desinstalando {bundle_id} del iPhone y reintentando")
         try:
             real_id, _ = installed_app(bundle_id)
@@ -110,6 +155,7 @@ def install(ipa, udid=None):
             pass
         ok, out = _xtool_install(ipa, udid)
         if ok:
+            stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
             return
     sys.exit(f"error: xtool no pudo instalar la app:\n{out[-2000:]}")
 

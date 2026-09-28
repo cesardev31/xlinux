@@ -158,6 +158,13 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
   túnel userspace (TCP en Python) funciona sin sudo pero a veces se atasca minutos.
 - Una app de debug que queda sin debugger se congela en la siguiente parada del JIT y
   traba al instalador de iOS: antes de instalar se cierran sus instancias (DVT kill).
+- Registro de plugins Dart: aunque Flutter crea que el iPhone es "linux", el
+  `dart_plugin_registrant.dart` incluye todas las plataformas y elige con
+  `Platform.isIOS` en tiempo de ejecución: hot restart funciona con plugins.
+- Caché: si el código nativo generado, los plugins, el engine y las herramientas no
+  cambian, se salta `swift build` (~30 s en Volaré aun sin cambios); si el `.app` es
+  idéntico al instalado en ese iPhone (registro por iPhone y app), no se reinstala.
+  El `.app` se instala sin comprimir.
 - `target.memory-module-load-level minimal`: sin la caché compartida extraída
   (DeviceSupport de Xcode) lldb leería ~500 librerías desde la memoria del iPhone.
 
@@ -187,9 +194,8 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 
 - `actool` sin `Assets.car`: no hay colores ni datos del catálogo (`UIColor(named:)`,
   `NSDataAsset`), y se pierde el "template rendering" de los íconos.
-- Debug arranca en ~1 min (compilar + instalar + adjuntar lldb).
-- Flutter solo acepta custom devices "linux": un hot restart envía el registrante de
-  plugins Dart de Linux.
+- Debug: cuando cambia el Dart hay que reinstalar la app (~40 s en una app grande); sin
+  cambios nativos ni de Dart, `flutter run` salta compilación nativa e instalación (~11 s).
 - Cuenta gratis: el certificado dura 7 días, máximo 3 apps, sin push, Apple Pay ni
   Sign in with Apple; xtool antepone `XTL-<team>.` al bundle ID. No borres la última app
   firmada o iOS pide volver a confiar en el desarrollador.
@@ -198,7 +204,8 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 
 ## Próximos pasos
 
-1. Arranque de debug: evitar recompilar/reinstalar el nativo si no cambió.
+1. Cambios de Dart sin reinstalar (subir el kernel al contenedor de la app y lanzar con
+   `--flutter-assets-dir`).
 2. Plugins solo-CocoaPods (podspec → Package.swift).
 3. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
    (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).
