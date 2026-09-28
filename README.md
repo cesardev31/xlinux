@@ -26,7 +26,7 @@ Probado en un iPhone 11 con iOS 27.2 y una cuenta de Apple gratuita.
 | Hot reload (`flutter run` y protocolo de VS Code) | ✅ |
 | iPhone visible en `flutter devices` / VS Code | ✅ |
 | Native assets (hooks de Dart, p. ej. `objective_c`) en debug | ✅ |
-| Plugins nativos por SwiftPM | ✅ Volaré: firebase_core, google_sign_in, flutter_stripe, webview, url_launcher, shared_preferences |
+| Plugins nativos por SwiftPM | ✅ Volaré: firebase_core, google_sign_in (login con Google funcionando), flutter_stripe, webview, url_launcher, shared_preferences |
 | Plugins solo con CocoaPods | ❌ |
 | Release con native assets (`flutter assemble` + gen_snapshot en Darling) | ✅ Volaré abre rápido, con animaciones |
 
@@ -162,6 +162,9 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
   se compila una versión con stubs (`<datos>/src/OpenAppleMacros`) y `setup` la instala.
 - Swift Build no activa los cross-import overlays (`_PassKit_SwiftUI` →
   `PayWithApplePayButton`): se pasa `-enable-cross-import-overlays`.
+- `-ObjC` al enlazar el Runner: sin él el linker descarta las categorías de Objective-C
+  de las librerías estáticas (AppAuth → "unrecognized selector ... presentAuthorizationRequest"
+  y Google Sign-In falla en ejecución). CocoaPods/Xcode lo agregan siempre.
 - Las copias de SwiftPM son de solo lectura: `actool` no debe copiar permisos.
 - Los frameworks de native assets quedan en `<salida de assemble>/native_assets/`.
 - `flutter assemble` release deja App.framework universal: se adelgaza con `lipo -thin`
