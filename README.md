@@ -10,6 +10,9 @@ flutter-ios-linux run              # release: compila, instala, abre y muestra l
 flutter-ios-linux build [--debug] [--install] [--project DIR]
 flutter-ios-linux doctor           # diagnóstico
 flutter-ios-linux setup            # preparar el entorno (una vez)
+flutter-ios-linux device screenshot iphone.png
+flutter-ios-linux device mirror                 # visor web en 127.0.0.1:8080
+flutter-ios-linux device mirror --mode vnc      # VNC con control táctil
 ```
 
 ## Estado
@@ -91,6 +94,32 @@ compila el shim de Darling y registra el iPhone en `~/.config/flutter/custom_dev
 
 En el iPhone: modo desarrollador activado y confiar en tu Apple ID (Ajustes →
 General → VPN y gestión de dispositivos).
+
+## Ver y controlar el iPhone
+
+`device screenshot` captura la pantalla completa mediante CoreDevice. También
+queda registrado en el custom device, por lo que `flutter screenshot -d
+iphone-linux` puede guardar una captura directamente. `device mirror` transmite
+la pantalla mediante el túnel userspace de pymobiledevice3, sin sudo. El modo
+web ofrece un visor en el navegador; el modo VNC acepta clics y los convierte en
+eventos táctiles HID. Vuelve a ejecutar `flutter-ios-linux setup` una vez para
+actualizar el custom device existente con soporte de capturas.
+
+Para agentes hay una interfaz sin UI que escribe una respuesta JSON por acción.
+Las coordenadas están normalizadas entre `0` y `1`, independientemente del modelo
+de iPhone:
+
+```bash
+flutter-ios-linux device agent snapshot
+# {"ok": true, "path": "/tmp/flutter-ios-linux/screen.png", "width": ..., "height": ...}
+flutter-ios-linux device agent tap 0.5 0.8
+flutter-ios-linux device agent swipe 0.5 0.8 0.5 0.2 --duration 0.4
+flutter-ios-linux device agent type "texto"
+flutter-ios-linux device agent button home
+```
+
+Esto permite automatizar el ciclo `editar → hot reload → snapshot → inspección
+visual → interacción → snapshot` desde cualquier agente con acceso al shell.
 
 ## Detalles que costaron (para no redescubrirlos)
 

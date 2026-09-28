@@ -3,11 +3,11 @@
 Replica lo que `flutter build ios` genera en macOS cuando SwiftPM está activo
 (ver flutter_tools/lib/src/macos/swift_package_manager.dart):
 
-  build/ios-linux-spm/Packages/
+  build/ios-linux-spm-<modo>/Packages/
     .packages/FlutterFramework/           target vacío: Flutter.framework llega por -F
     .packages/<plugin>-<versión>  ->      symlink a <plugin>/ios/<plugin> (su Package.swift)
     FlutterGeneratedPluginSwiftPackage/   depende de todos los plugins
-  build/ios-linux-spm/Runner/             (nuestro) el Runner como ejecutable SwiftPM
+  build/ios-linux-spm-<modo>/Runner/      (nuestro) el Runner como ejecutable SwiftPM
 
 SwiftPM hace de "resolvedor": descarga y compila las dependencias de cada
 plugin (Firebase, Stripe, GoogleSignIn...), incluidos xcframeworks binarios.
@@ -179,7 +179,10 @@ let package = Package(
 
 def build(project, flutter_fw_parent):
     """Compila el Runner con todos los plugins. Devuelve el directorio de salida."""
-    spm_dir = project.dir / "build/ios-linux-spm"
+    # Carpetas separadas por modo: debug y release se pueden compilar a la vez
+    # (SwiftPM bloquea su carpeta de trabajo mientras compila).
+    mode = "debug" if project.debug else "release"
+    spm_dir = project.dir / f"build/ios-linux-spm-{mode}"
     plugins = generate(project, spm_dir)
     pkg = generate_runner(project, spm_dir)
     log(f"Runner + plugins con SwiftPM ({', '.join(n for n, _, _ in plugins)})")
@@ -187,7 +190,7 @@ def build(project, flutter_fw_parent):
     # FRAMEWORK_SEARCH_PATHS, aquí por -F en todos los targets.
     fw = str(flutter_fw_parent)
     shallow = [dep for _, _, package in plugins for dep in toolchain.exact_dependencies(package)]
-    out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=project.package, shallow=shallow, extra_flags=[
+    out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=f"{project.package}-{mode}", shallow=shallow, extra_flags=[
         "-Xswiftc", "-F", "-Xswiftc", fw, "-Xcc", f"-F{fw}",
         "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter"])
     if not (out / "Runner").exists():

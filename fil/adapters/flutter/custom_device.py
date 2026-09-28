@@ -39,7 +39,8 @@ def device_config():
         "runDebug": [cli, "device", "run-debug", "--engine-options=${engineOptions}"],
         "forwardPort": None,
         "forwardPortSuccessRegex": None,
-        "screenshot": None,
+        # Flutter espera que el comando escriba el PNG codificado en base64.
+        "screenshot": [cli, "device", "screenshot", "--base64"],
     }
 
 

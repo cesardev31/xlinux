@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -62,6 +63,32 @@ def cmd_device_run_debug(args):
     flutter_debug.run_debug(project, args.engine_options, device.first_device()[0])
 
 
+def cmd_device_screenshot(args):
+    udid = device.first_device()[0]
+    if args.base64:
+        print(device.screenshot_base64(udid))
+        return
+    print(device.screenshot(args.output, udid))
+
+
+def cmd_device_mirror(args):
+    device.mirror(device.first_device()[0], mode=args.mode, bind=args.bind, port=args.port,
+                  password=args.password, audio=args.audio,
+                  share_clipboard=args.share_clipboard)
+
+
+def cmd_agent_snapshot(args):
+    print(json.dumps(device.screenshot_info(args.output, device.first_device()[0])))
+
+
+def cmd_agent_input(args):
+    values = ([args.x, args.y] if args.agent_command == "tap" else
+              [args.x1, args.y1, args.x2, args.y2] if args.agent_command == "swipe" else
+              [args.text] if args.agent_command == "type" else [args.name])
+    print(json.dumps(device.agent_input(device.first_device()[0], args.agent_command, values,
+                                       duration=getattr(args, "duration", 0.3))))
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="flutter-ios-linux",
@@ -94,6 +121,40 @@ def main():
     p = dsub.add_parser("run-debug")
     p.add_argument("--engine-options", default="")
     p.set_defaults(func=cmd_device_run_debug)
+    p = dsub.add_parser("screenshot", help="capturar la pantalla del iPhone como PNG")
+    p.add_argument("output", nargs="?", default="iphone.png")
+    p.add_argument("--base64", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_device_screenshot)
+    p = dsub.add_parser("mirror", help="ver y controlar el iPhone por web o VNC")
+    p.add_argument("--mode", choices=("web", "vnc"), default="web")
+    p.add_argument("--bind", default="127.0.0.1")
+    p.add_argument("--port", type=int)
+    p.add_argument("--password")
+    p.add_argument("--audio", action="store_true", help="reproducir audio del iPhone (VNC)")
+    p.add_argument("--share-clipboard", action="store_true", help="compartir portapapeles (VNC)")
+    p.set_defaults(func=cmd_device_mirror)
+    p = dsub.add_parser("agent", help="acciones JSON para agentes de desarrollo")
+    agent = p.add_subparsers(dest="agent_command", required=True)
+    p = agent.add_parser("snapshot", help="capturar PNG y devolver ruta/dimensiones como JSON")
+    p.add_argument("output", nargs="?", default="/tmp/flutter-ios-linux/screen.png")
+    p.set_defaults(func=cmd_agent_snapshot)
+    p = agent.add_parser("tap", help="tocar coordenadas normalizadas 0..1")
+    p.add_argument("x", type=float)
+    p.add_argument("y", type=float)
+    p.set_defaults(func=cmd_agent_input)
+    p = agent.add_parser("swipe", help="arrastrar entre coordenadas normalizadas 0..1")
+    p.add_argument("x1", type=float)
+    p.add_argument("y1", type=float)
+    p.add_argument("x2", type=float)
+    p.add_argument("y2", type=float)
+    p.add_argument("--duration", type=float, default=0.3)
+    p.set_defaults(func=cmd_agent_input)
+    p = agent.add_parser("type", help="escribir texto ASCII")
+    p.add_argument("text")
+    p.set_defaults(func=cmd_agent_input)
+    p = agent.add_parser("button", help="pulsar un botón físico")
+    p.add_argument("name", choices=("home", "lock", "volume-up", "volume-down", "mute", "siri"))
+    p.set_defaults(func=cmd_agent_input)
 
     args = parser.parse_args()
     args.func(args)

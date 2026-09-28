@@ -1,14 +1,19 @@
 """Todo lo que habla con el iPhone: detectar, instalar, lanzar y depurar."""
 
+import base64
 import json
 import os
+import plistlib
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import zipfile
+from pathlib import Path
 
 from . import config
 from .util import log, output, run
@@ -44,12 +49,45 @@ def ensure_developer_image():
             capture_output=True, text=True)
 
 
+INSTALL_TIMEOUT = 240
+
+
+def _ipa_bundle_id(ipa):
+    with zipfile.ZipFile(ipa) as z:
+        name = next(n for n in z.namelist() if n.count("/") == 2 and n.endswith(".app/Info.plist"))
+        return plistlib.loads(z.read(name))["CFBundleIdentifier"]
+
+
+def _xtool_install(ipa, udid):
+    cmd = ["xtool", "install", ipa] + (["--udid", udid] if udid else [])
+    try:
+        result = run(cmd, capture_output=True, text=True, check=False, timeout=INSTALL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    out = (result.stdout or "") + (result.stderr or "")
+    return "Successfully installed" in out, out
+
+
 def install(ipa, udid=None):
     log("Firmando e instalando con xtool")
-    cmd = ["xtool", "install", ipa] + (["--udid", udid] if udid else [])
-    result = run(cmd, capture_output=True, text=True, check=False)
-    if "Successfully installed" not in (result.stdout or ""):
-        sys.exit(f"error: xtool no pudo instalar la app:\n{(result.stdout or '')[-2000:]}{result.stderr or ''}")
+    ok, out = _xtool_install(ipa, udid)
+    if ok:
+        return
+    if out == "timeout":
+        # Visto en la práctica: si una instalación se corta a la mitad, iOS queda
+        # trabado con ese bundle ID y xtool espera para siempre al subir la app.
+        # Desinstalarla (solo esa; se pierden sus datos locales) lo destraba.
+        bundle_id = _ipa_bundle_id(ipa)
+        log(f"La instalación se trabó; desinstalando {bundle_id} del iPhone y reintentando")
+        try:
+            real_id, _ = installed_app(bundle_id)
+            run(["pymobiledevice3", "apps", "uninstall", real_id], capture_output=True, text=True, check=False)
+        except SystemExit:
+            pass
+        ok, out = _xtool_install(ipa, udid)
+        if ok:
+            return
+    sys.exit(f"error: xtool no pudo instalar la app:\n{out[-2000:]}")
 
 
 def installed_app(bundle_id):
@@ -72,6 +110,98 @@ def launch(bundle_id):
 def stream_logs(process_name="Runner", match=None):
     cmd = ["pymobiledevice3", "syslog", "live", "-pn", process_name] + (["-m", match] if match else [])
     subprocess.run(cmd, env=config.tool_env())
+
+
+def _visual_command(udid, *args):
+    """Comando CoreDevice fijado al iPhone indicado y con túnel userspace."""
+    env = config.tool_env()
+    env["PYMOBILEDEVICE3_UDID"] = udid
+    return [config.pymobiledevice3_python(), "-m", "pymobiledevice3", *args, "--userspace"], env
+
+
+def screenshot(path, udid):
+    """Captura la pantalla completa del iPhone como PNG."""
+    ensure_developer_image()
+    path = Path(path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cmd, env = _visual_command(
+        udid, "developer", "core-device", "screen-capture", "screenshot", path
+    )
+    run(cmd, env=env, capture_output=True, text=True)
+    if not path.exists() or path.stat().st_size == 0:
+        sys.exit("error: pymobiledevice3 no produjo la captura de pantalla")
+    return path
+
+
+def screenshot_base64(udid):
+    """Captura PNG codificada para el protocolo de custom devices de Flutter."""
+    with tempfile.TemporaryDirectory(prefix="fil-screenshot-") as directory:
+        path = screenshot(Path(directory) / "iphone.png", udid)
+        return base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def screenshot_info(path, udid):
+    """Captura y devuelve metadatos pequeños para consumidores automáticos."""
+    path = screenshot(path, udid)
+    with path.open("rb") as image:
+        header = image.read(24)
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
+        sys.exit("error: la captura no es un PNG válido")
+    width, height = struct.unpack(">II", header[16:24])
+    return {"ok": True, "path": str(path), "format": "png", "width": width, "height": height}
+
+
+def _hid_coordinate(value):
+    if not 0.0 <= value <= 1.0:
+        raise ValueError("las coordenadas deben estar entre 0 y 1")
+    return round(value * 65535)
+
+
+def agent_input(udid, action, values=(), duration=0.3):
+    """Ejecuta una acción determinista para agentes usando coordenadas 0..1."""
+    ensure_developer_image()
+    if action == "tap":
+        x, y = (_hid_coordinate(float(v)) for v in values)
+        command = ["developer", "core-device", "universal-hid-service", "tap", str(x), str(y)]
+    elif action == "swipe":
+        x1, y1, x2, y2 = (_hid_coordinate(float(v)) for v in values)
+        # drag genera contacto real; el comando swipe de CoreDevice sólo mueve el puntero.
+        command = ["developer", "core-device", "universal-hid-service", "drag",
+                   str(x1), str(y1), str(x2), str(y2), "--duration", str(duration)]
+    elif action == "type":
+        command = ["developer", "core-device", "universal-hid-service", "type", str(values[0])]
+    elif action == "button":
+        command = ["developer", "core-device", "hid", "button", str(values[0])]
+    else:
+        raise ValueError(f"acción desconocida: {action}")
+    cmd, env = _visual_command(udid, *command)
+    run(cmd, env=env, capture_output=True, text=True)
+    return {"ok": True, "action": action}
+
+
+def mirror(udid, mode="web", bind="127.0.0.1", port=None, password=None,
+           audio=False, share_clipboard=False):
+    """Sirve la pantalla del iPhone por navegador o VNC, con control HID."""
+    ensure_developer_image()
+    if mode not in ("web", "vnc"):
+        raise ValueError(f"modo de mirror desconocido: {mode}")
+    if bind not in ("127.0.0.1", "localhost", "::1") and not password:
+        sys.exit("error: usa --password al publicar el mirror fuera de localhost")
+    port = port or (8080 if mode == "web" else 5901)
+    port_option = "--http-port" if mode == "web" else "--port"
+    command = ["developer", "core-device", "display", f"serve-{mode}",
+               "--bind", bind, port_option, str(port)]
+    if password:
+        command += ["--password", password]
+    if mode == "vnc":
+        if audio:
+            command.append("--audio")
+        if share_clipboard:
+            command.append("--share-clipboard")
+    cmd, env = _visual_command(udid, *command)
+    protocol = "http" if mode == "web" else "vnc"
+    log(f"Pantalla del iPhone en {protocol}://{bind}:{port} (Ctrl+C para salir)")
+    return subprocess.run(cmd, env=env).returncode
 
 
 def free_port():
