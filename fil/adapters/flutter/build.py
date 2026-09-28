@@ -203,6 +203,7 @@ def build(project_dir, debug=False):
     appkit.add_icons(project.ios / "Runner/Assets.xcassets/AppIcon.appiconset", project.app, info)
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
+    toolchain.thin_frameworks(project.app)
     appkit.package_ipa(project.app, project.ipa)
     log(f"Listo: {project.ipa}")
     return project

@@ -123,6 +123,21 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
     return products if products.is_dir() else scratch / "arm64-apple-ios" / configuration
 
 
+FAT_MAGICS = (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")
+
+
+def thin_frameworks(app, arch="arm64"):
+    """Deja solo `arch` en los binarios universales de Frameworks/ (lo que
+    hace Xcode con "embed and thin"). `flutter assemble` en release genera
+    App.framework universal, y firmar binarios "gordos" traba a xtool."""
+    for binary in (app / "Frameworks").glob("*.framework/*"):
+        if binary.is_file() and binary.name == binary.parent.stem:
+            with open(binary, "rb") as f:
+                if f.read(4) not in FAT_MAGICS:
+                    continue
+            run(["lipo", "-thin", arch, binary, "-output", binary], capture_output=True, text=True)
+
+
 def _is_static_archive(binary):
     try:
         with open(binary, "rb") as f:

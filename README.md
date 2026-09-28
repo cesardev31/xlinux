@@ -25,7 +25,7 @@ Probado en un iPhone 11 con iOS 27.2 y una cuenta de Apple gratuita.
 | Native assets (hooks de Dart, p. ej. `objective_c`) en debug | ✅ |
 | Plugins nativos por SwiftPM | ✅ Volaré: firebase_core, google_sign_in, flutter_stripe, webview, url_launcher, shared_preferences |
 | Plugins solo con CocoaPods | ❌ |
-| Native assets en release | ❌ (`flutter assemble` release necesita el `gen_snapshot` de macOS) |
+| Release con native assets (`flutter assemble` + gen_snapshot en Darling) | ✅ Volaré abre rápido, con animaciones |
 
 ## Cómo funciona
 
@@ -38,7 +38,7 @@ Probado en un iPhone 11 con iOS 27.2 y una cuenta de Apple gratuita.
 | `actool` (asset catalogs → `Assets.car`) | `support/core/bin/actool`: imagesets a PNG sueltos (`nombre@2x.png`), SVG/PDF rasterizados (cairosvg / pdftocairo), AppIcon → `CFBundleIcons` |
 | `ibtool` (`Main.storyboard`) | `support/flutter/FlutterLinuxSceneDelegate.swift` crea la ventana por código; `UILaunchScreen` en Info.plist |
 | macros de Xcode (`#Preview`, `@Observable`…) | OpenAppleMacros de xtool (con stubs para `#Preview` de UIKit) |
-| `flutter build ios` / `flutter assemble` | debug: `flutter assemble` con los mismos `-d` que Xcode; release: kernel + `gen_snapshot` a mano |
+| `flutter build ios` / `flutter assemble` | `flutter assemble` con los mismos `-d` que Xcode; en release, `gen_snapshot_arm64` de la caché de Flutter es un envoltorio que lo corre en Darling |
 | firmar e instalar | **xtool** (Apple ID gratis o de pago) |
 | debug (el JIT de Dart necesita debugger) | **pymobiledevice3** (túnel userspace, sin sudo) + `support/core/device_bridge.py` + lldb con `support/core/lldb_driver.py` y el helper JIT de Flutter |
 | dispositivo en VS Code | *custom device* de Flutter (`fil/adapters/flutter/custom_device.py`) |
@@ -122,6 +122,10 @@ General → VPN y gestión de dispositivos).
   `PayWithApplePayButton`): se pasa `-enable-cross-import-overlays`.
 - Las copias de SwiftPM son de solo lectura: `actool` no debe copiar permisos.
 - Los frameworks de native assets quedan en `<salida de assemble>/native_assets/`.
+- `flutter assemble` release deja App.framework universal: se adelgaza con `lipo -thin`
+  como hace Xcode ("embed and thin").
+- Si una instalación se corta a la mitad, iOS puede quedar trabado con ese bundle ID y
+  xtool se cuelga al subir la app: desinstalarla y volver a instalar lo destraba.
 - El AppImage de xtool no monta FUSE cuando lo lanza el snap de Flutter → se usa extraído.
 
 ## Limitaciones conocidas
@@ -139,6 +143,8 @@ General → VPN y gestión de dispositivos).
 ## Próximos pasos
 
 1. Native assets en release y cachear el build nativo entre corridas.
-2. Plugins solo-CocoaPods (podspec → Package.swift).
-3. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
+2. Debug más rápido (túnel de kernel en vez del TCP userspace en Python; menos idas y vueltas por página JIT).
+3. Carpetas de SwiftPM separadas para debug/release (hoy no se pueden compilar a la vez).
+4. Plugins solo-CocoaPods (podspec → Package.swift).
+5. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
    (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).
