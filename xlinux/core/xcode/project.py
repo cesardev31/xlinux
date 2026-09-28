@@ -8,6 +8,8 @@ settings per target (see settings.py) with the builtins Xcode provides.
 
 import json
 import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 from .. import config
@@ -55,10 +57,36 @@ class XcodeProject:
         s = Settings(layers, builtins)
         products = s.get("CONFIGURATION_BUILD_DIR") or \
             f"{self.build_dir}/{self.configuration}-iphoneos/{name}"
-        temp = self.build_dir / "Intermediates" / name
+        temp = self.build_dir / "Intermediates" / self.configuration / name
         s.builtins.update(CONFIGURATION_BUILD_DIR=products, BUILT_PRODUCTS_DIR=products,
                           TARGET_TEMP_DIR=str(temp), DERIVED_FILE_DIR=str(temp / "DerivedSources"))
         return s
+
+    def script_env(self, target, s, extra=None):
+        """Environment for a target's script phase: Xcode exports every build
+        setting to the scripts it runs."""
+        env = config.tool_env()
+        keys = set(s.builtins)
+        for layer in s.layers:
+            keys |= set(layer)
+        for key in keys:
+            env[key] = s.get(key)
+        env.update(PODS_TARGET_SRCROOT=s.get("PODS_TARGET_SRCROOT"), TARGET_NAME=target["name"],
+                   BUNDLE_FORMAT="shallow", ACTION="build")
+        node = shutil.which("node", path=env.get("PATH"))
+        if node:
+            env["NODE_BINARY"] = node
+        env.update(extra or {})
+        return env
+
+    def run_script(self, target, s, script, extra_env=None):
+        env = self.script_env(target, s, extra_env)
+        result = subprocess.run(["/bin/bash", "-c", script["script"]], cwd=self.root, env=env,
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError(f"script phase '{script['name']}' of {target['name']} failed:\n"
+                               f"{(result.stdout + result.stderr)[-4000:]}")
+        return result
 
     def prepare_xcframeworks(self, target, s):
         """What <Pod>-xcframeworks.sh does: expose each vendored XCFramework's

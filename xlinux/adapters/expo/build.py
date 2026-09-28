@@ -8,7 +8,9 @@
   app target         -> compiled, linked and assembled (core/xcode/package.py)
 
 Debug builds use expo-dev-client: the app loads its JavaScript from Metro
-(`xlinux run` starts it). Build products live in the data directory.
+(`xlinux run` starts it). Release builds embed the bundle, compiled to Hermes
+bytecode by React Native's own bundle phase with hermes-compiler's Linux
+hermesc. Build products live in the data directory.
 """
 
 import hashlib
@@ -25,6 +27,10 @@ from ...core.xcode import package, project as xproject
 from . import jsi, macros
 
 CONFIG_FILES = ("app.json", "app.config.js", "app.config.ts", "package.json")
+# Pod script phases that must run on every build: they swap prebuilt
+# XCFrameworks (Expo modules, React Native, Hermes) between their debug and
+# release flavors.
+FLAVOR_SCRIPTS = ("XCFramework for build configuration", "for the right configuration")
 
 
 class Project:
@@ -99,10 +105,36 @@ def configure_expo(project, app_target):
         run(["bash", script], cwd=project.ios, env=env, capture_output=True, text=True)
 
 
+def run_pod_scripts(pods, names):
+    """Run the pod script phases whose name contains one of `names`."""
+    for target in pods.targets.values():
+        for script in target.get("scripts", []):
+            if any(n in (script.get("name") or "") for n in names):
+                pods.run_script(target, pods.settings(target), script)
+
+
+def hermesc(project):
+    """Linux hermesc from hermes-compiler (the version React Native depends on;
+    the one in Pods/hermes-engine is a macOS binary)."""
+    found = list((project.dir / "node_modules/hermes-compiler/hermesc").glob("linux64-bin/hermesc"))
+    return str(found[0]) if found else None
+
+
+def bundle_javascript(app, target, settings, app_dir, compiler):
+    """The app's "Bundle React Native code and images" phase (skipped in Debug)."""
+    for script in target.get("scripts", []):
+        if "Bundle React Native" in (script.get("name") or ""):
+            extra = {"UNLOCALIZED_RESOURCES_FOLDER_PATH": app_dir.name,
+                     "CONFIGURATION_BUILD_DIR": str(app_dir.parent)}
+            if compiler:
+                extra["HERMES_CLI_PATH"] = compiler
+            if app.configuration != "Debug":
+                log("JavaScript bundle (expo export:embed + hermesc)")
+            app.run_script(target, settings, script, extra)
+
+
+
 def build(project_dir, debug=True):
-    if not debug:
-        sys.exit("error: Expo release builds are not supported yet: use --debug "
-                 "(the app loads its JavaScript from Metro through expo-dev-client)")
     config.require_data_dir()
     project = Project(project_dir, debug)
     project.lock = DirLock(project.build_dir, f"{project.dir.name} ({project.configuration.lower()})")
@@ -123,8 +155,11 @@ def build(project_dir, debug=True):
     context = xbuild.Context(pods_root, plugins)
 
     try:
+        run_pod_scripts(pods, FLAVOR_SCRIPTS)
         built = xbuild.build_targets(pods, [f"Pods-{app_target}"], context)
         pods.prepare_all_xcframeworks()
+        package.build_resource_bundles(pods)
+        run_pod_scripts(pods, ("Generate app.config",))  # EXConstants.bundle/app.config
         log(f"Pods: {built} rebuilt" if built else "Pods: up to date")
         configure_expo(project, app_target)
         target = app.targets[app_target]
@@ -136,7 +171,8 @@ def build(project_dir, debug=True):
             shutil.rmtree(app_dir)
         package.link(app, app_target, objects, app_dir / app_target)
         project.bundle_id = package.assemble(app, pods, app_target, app_dir)
-    except xbuild.BuildError as e:
+        bundle_javascript(app, target, settings, app_dir, hermesc(project))
+    except (xbuild.BuildError, RuntimeError) as e:
         sys.exit(f"error: {e}")
     project.app = app_dir
     log(f"Done: {app_dir}")

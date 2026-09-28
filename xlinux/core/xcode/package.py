@@ -125,8 +125,6 @@ def assemble(app_project, pods, target_name, app_dir):
     pods_settings = pods.settings(pods.targets[f"Pods-{target_name}"])
     configuration = app_project.configuration
 
-    build_resource_bundles(pods)
-
     frameworks = app_dir / "Frameworks"
     shutil.rmtree(frameworks, ignore_errors=True)
     frameworks.mkdir()

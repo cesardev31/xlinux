@@ -36,6 +36,12 @@ def lan_address():
             return "127.0.0.1"
 
 
+def run_release(project):
+    """Launch the installed release app and stream its logs."""
+    device.launch(project.bundle_identifier())
+    device.stream_logs(project.app.stem)
+
+
 def run_debug(project):
     """Launch the installed app and serve its JavaScript with Metro."""
     device.launch(project.bundle_identifier())

@@ -55,11 +55,15 @@ def cmd_build(args):
 
 def cmd_run(args):
     if detect_adapter(args.project) is expo:
-        # Expo: a debug build with expo-dev-client, JavaScript served by Metro.
-        project = expo_build.build(args.project, debug=True)
+        # Expo: debug with expo-dev-client and Metro, or a release with the
+        # JavaScript bundled in the app.
+        project = expo_build.build(args.project, debug=not args.release)
         device.install(project.app, device.first_device()[0])
         project.lock.release()
-        expo.run_debug(project)
+        if args.release:
+            expo.run_release(project)
+        else:
+            expo.run_debug(project)
         return
     project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args))
     device.install(project.ipa, device.first_device()[0])
@@ -156,6 +160,8 @@ def main():
     p = sub.add_parser("run", help="build, install and launch: Flutter in release mode (streams logs), "
                                      "Expo in debug mode (starts Metro)")
     p.add_argument("--project", default=".")
+    p.add_argument("--release", action="store_true",
+                   help="Expo: release build (JavaScript bundled) instead of debug + Metro")
     _add_dart_define_options(p)
     p.set_defaults(func=cmd_run)
 
