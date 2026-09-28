@@ -168,6 +168,11 @@ let package = Package(
             name: "Runner",
             dependencies: ["RunnerRegistrant"],
             linkerSettings: [
+                // Fuerza la carga de objetos Objective-C que solo contienen
+                // categorías. Dependencias como AppAuth implementan APIs de
+                // iOS mediante categorías y el linker las descartaría si no
+                // hay un símbolo tradicional que las referencie.
+                .unsafeFlags(["-Xlinker", "-ObjC"]),
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks"]),
             ]
         ),
