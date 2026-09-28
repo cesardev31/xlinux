@@ -1,0 +1,4 @@
+#!/bin/sh
+# CocoaPods on Linux: Ruby's `command -v ccache` needs an executable `command`
+# (macOS ships /usr/bin/command; on Linux it's only a shell builtin).
+command "$@"

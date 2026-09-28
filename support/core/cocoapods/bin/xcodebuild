@@ -1,0 +1,3 @@
+#!/bin/sh
+# CocoaPods on Linux: React Native's pod scripts only ask `xcodebuild -version`.
+printf 'Xcode 27.0\nBuild version 27A0000\n'

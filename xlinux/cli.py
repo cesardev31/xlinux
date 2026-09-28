@@ -5,19 +5,22 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .adapters import flutter
+from .adapters import expo, flutter
+from .adapters.expo import build as expo_build
 from .adapters.flutter import build as flutter_build
 from .adapters.flutter import debug as flutter_debug
 from .core import device, setup
 
-ADAPTERS = [flutter]
+ADAPTERS = [flutter, expo]
 
 
 def detect_adapter(project_dir):
     if (Path(project_dir) / "pubspec.yaml").exists():
         return flutter
+    if expo.detects(project_dir):
+        return expo
     sys.exit(f"error: unrecognized project type in {Path(project_dir).resolve()} "
-             "(supported: Flutter)")
+             "(supported: Flutter, Expo)")
 
 
 def cmd_setup(args):
@@ -40,14 +43,24 @@ def _add_dart_define_options(p):
 
 
 def cmd_build(args):
-    detect_adapter(args.project)
+    if detect_adapter(args.project) is expo:
+        project = expo_build.build(args.project, debug=args.debug)
+        if args.install:
+            device.install(project.app, device.first_device()[0])
+        return
     project = flutter_build.build(args.project, debug=args.debug, dart_defines=_dart_defines(args))
     if args.install:
         device.install(project.ipa, device.first_device()[0])
 
 
 def cmd_run(args):
-    detect_adapter(args.project)
+    if detect_adapter(args.project) is expo:
+        # Expo: a debug build with expo-dev-client, JavaScript served by Metro.
+        project = expo_build.build(args.project, debug=True)
+        device.install(project.app, device.first_device()[0])
+        project.lock.release()
+        expo.run_debug(project)
+        return
     project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args))
     device.install(project.ipa, device.first_device()[0])
     project.lock.release()  # the logs below can run for hours
@@ -140,7 +153,8 @@ def main():
     _add_dart_define_options(p)
     p.set_defaults(func=cmd_build)
 
-    p = sub.add_parser("run", help="build in release mode, install, launch and stream logs")
+    p = sub.add_parser("run", help="build, install and launch: Flutter in release mode (streams logs), "
+                                     "Expo in debug mode (starts Metro)")
     p.add_argument("--project", default=".")
     _add_dart_define_options(p)
     p.set_defaults(func=cmd_run)

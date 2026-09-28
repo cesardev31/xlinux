@@ -1,0 +1,27 @@
+diff -ru a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
+--- a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
+@@ -215,8 +215,9 @@
+       .toOpaque()
+     // Pass a null setter to C++ when the Swift setter is nil so that JS assignment
+     // raises a `jsi::JSError` directly, without crossing the Swift boundary.
+-    let callbacks = expo.HostObjectCallbacks(
+-      context, getter, set == nil ? nil : setter, propertyNamesGetter, deallocate)
++    let callbacks = set == nil
++      ? expo.HostObjectCallbacks(context, getter, nil, propertyNamesGetter, deallocate)
++      : expo.HostObjectCallbacks(context, getter, setter, propertyNamesGetter, deallocate)
+     let hostObject = expo.HostObject.makeObject(pointee, consume callbacks)
+ 
+     return JavaScriptObject(self, hostObject)
+diff -ru a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
+--- a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
+@@ -82,7 +82,7 @@
+ /// via the `SWIFT_NAME(_message)` annotation in `CppError.h`. This extension
+ /// wraps it in a Swift `String` for cleaner call-site usage.
+ extension expo.CppError: Error {
+-  public var message: String {
++  var message: String {
+     return String(_getMessage())
+   }
+ }

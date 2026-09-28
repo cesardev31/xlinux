@@ -1,0 +1,4 @@
+#!/bin/sh
+# CocoaPods on Linux: the two-argument form of macOS ditto its scripts use.
+src="$1"; dst="$2"
+if [ -d "$dst" ]; then cp -f "$src" "$dst/"; else mkdir -p "$(dirname "$dst")"; cp -f "$src" "$dst"; fi

@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+# CocoaPods on Linux: pods' prepare_command scripts call `clang` expecting
+# Apple's, which targets iOS (e.g. ExpoModulesJSI's stub xcframework).
+import os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from xlinux.core import config  # noqa: E402
+args = ["clang", "-target", f"arm64-apple-ios{config.MIN_IOS}", "-isysroot", str(config.IPHONE_SDK),
+        "-fuse-ld=lld", "-B", str(config.TOOLSET_BIN), *sys.argv[1:]]
+path = os.environ["PATH"].split(os.pathsep)
+here = str(Path(__file__).resolve().parent)
+os.environ["PATH"] = os.pathsep.join(p for p in path if os.path.realpath(p) != here)
+os.execvp("clang", args)

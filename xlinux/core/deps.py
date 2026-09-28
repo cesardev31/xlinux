@@ -431,6 +431,51 @@ def ensure_mcp_sdk():
     run([ensure_uv(), "pip", "install", "-q", "--python", python, "mcp", "pillow"], stdout=sys.stderr)
 
 
+def cocoapods_env():
+    """Environment to run CocoaPods (and its xcodeproj gem) on Linux: the
+    portable Ruby and gems installed by ensure_cocoapods(), plus stand-ins for
+    the macOS tools pod scripts call (support/core/cocoapods)."""
+    data = config.data_dir()
+    ruby = next(iter(sorted((data / "ruby").glob("portable-ruby/*/bin/ruby"))), None)
+    env = config.tool_env()
+    support = config.SUPPORT / "core/cocoapods"
+    env.update(
+        GEM_HOME=str(data / "ruby/gems"), GEM_PATH=str(data / "ruby/gems"),
+        CP_HOME_DIR=str(data / "ruby/cocoapods-home"),
+        LANG="C.UTF-8", LC_ALL="C.UTF-8",
+        # Ruby's default encoding and binary plists (xcodeproj only reads XML ones on Linux).
+        RUBYOPT=f"-EUTF-8 -r{support / 'linux.rb'}",
+        # GNU tar warns about Apple's xattr headers on stderr, which Expo's
+        # scripts read together with the extracted file.
+        TAR_OPTIONS="--warning=no-unknown-keyword",
+        PATH=f"{support / 'bin'}:{data / 'ruby/gems/bin'}:{ruby.parent if ruby else ''}:{env['PATH']}",
+        XLINUX_RUBY=str(ruby) if ruby else "ruby",
+    )
+    return env
+
+
+def ensure_cocoapods():
+    """Ruby (Homebrew's portable build, no system install) and CocoaPods in
+    the data directory, for React Native / Expo projects."""
+    env = cocoapods_env()
+    if (config.data_dir() / "ruby/gems/bin/pod").exists() and Path(env["XLINUX_RUBY"]).exists():
+        return env
+    data = config.data_dir()
+    if not Path(env["XLINUX_RUBY"]).exists():
+        name, url = github_asset("Homebrew/homebrew-portable-ruby",
+                                 lambda n: n.endswith(f".{arch()}_linux.bottle.tar.gz"))
+        archive = download(url, data / "downloads" / name)
+        (data / "ruby").mkdir(parents=True, exist_ok=True)
+        log("Extracting portable Ruby")
+        with tarfile.open(archive) as tar:
+            tar.extractall(data / "ruby", filter="tar")
+        env = cocoapods_env()
+    log("Installing CocoaPods (Ruby gem, into the data directory)")
+    run([Path(env["XLINUX_RUBY"]).parent / "gem", "install", "cocoapods", "--no-document"], env=env,
+        stdout=sys.stderr)
+    return cocoapods_env()
+
+
 def ensure_rcodesign():
     """rcodesign (apple-codesign) in <data>/bin: writes the ad-hoc signature
     carrying a target's entitlements, which xtool reads back when signing."""
