@@ -1,8 +1,9 @@
 """Adaptador Flutter: lo mismo que `flutter build ios` + Xcode.
 
-release:  Dart -> kernel -> gen_snapshot (binario macOS en Darling) -> App.framework
-debug:    App.framework es un stub; el código va como kernel_blob.bin (JIT)
-ambos:    flutter_assets, Runner (+ plugins por SwiftPM), Runner.app, .ipa
+`flutter assemble` (como Xcode): App.framework + flutter_assets + native assets
+          (release: Dart AOT con el gen_snapshot de macOS en Darling;
+           debug: stub + kernel_blob.bin para JIT)
+luego:    Runner (+ plugins por SwiftPM), Runner.app, .ipa
 """
 
 import json
@@ -15,7 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from ...core import app as appkit
-from ...core import config, darling, toolchain
+from ...core import config, toolchain
 from ...core.util import log, output, run
 from . import plugins
 
@@ -67,87 +68,73 @@ def ensure_engine(revision):
     return root
 
 
+GEN_SNAPSHOT_WRAPPER = """#!/usr/bin/env python3
+# Generado por flutter-ios-linux. El gen_snapshot de iOS solo existe para
+# macOS: `flutter assemble` (release/profile) lo llama y aquí corre en Darling.
+import sys
+sys.path.insert(0, {repo!r})
+from fil.core import darling
+result = darling.run_macos_tool({real!r}, sys.argv[1:], capture_output=False, check=False)
+sys.exit(result.returncode)
+"""
+MARKER = ".flutter-ios-linux"
+
+
 def link_engine_into_flutter_cache(flutter_root, engine):
     """`flutter assemble` busca los artefactos iOS en su propia caché (lo que
     haría `flutter precache --ios`): se enlazan a los del directorio de datos
-    en vez de descargarlos otra vez al disco interno."""
+    en vez de descargarlos otra vez al disco interno. En ios-release,
+    gen_snapshot_arm64 se reemplaza por un envoltorio que lo corre en Darling."""
     cache = flutter_root / "bin/cache/artifacts/engine"
-    for mode in ("ios", "ios-release"):
-        link = cache / mode
-        if link.is_symlink() and link.resolve() == (engine / mode).resolve():
+    debug = cache / "ios"
+    if not (debug.exists() and not debug.is_symlink()):  # un precache real se respeta
+        if debug.is_symlink() and debug.resolve() != (engine / "ios").resolve():
+            debug.unlink()
+        if not debug.exists():
+            debug.symlink_to(engine / "ios")
+
+    release = cache / "ios-release"
+    if release.exists() and not release.is_symlink() and not (release / MARKER).exists():
+        return  # precache real
+    if release.is_symlink():
+        release.unlink()
+    release.mkdir(exist_ok=True)
+    (release / MARKER).write_text(str(engine / "ios-release") + "\n")
+    for item in (engine / "ios-release").iterdir():
+        link = release / item.name
+        if item.name == "gen_snapshot_arm64":
             continue
-        if link.exists() and not link.is_symlink():
-            continue  # precache real: se respeta
-        if link.is_symlink():
-            link.unlink()
-        link.symlink_to(engine / mode)
+        if not link.is_symlink():
+            link.symlink_to(item)
+    wrapper = release / "gen_snapshot_arm64"
+    if wrapper.is_symlink():
+        wrapper.unlink()
+    wrapper.write_text(GEN_SNAPSHOT_WRAPPER.format(
+        repo=str(config.REPO), real=str(engine / "ios-release/gen_snapshot_arm64")))
+    wrapper.chmod(0o755)
 
 
-def compile_kernel(flutter_root, project, out):
-    log("Dart -> kernel (frontend_server)")
-    cache = flutter_root / "bin/cache"
-    run([
-        cache / "dart-sdk/bin/dartaotruntime",
-        cache / "dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot",
-        "--sdk-root", cache / "artifacts/engine/common/flutter_patched_sdk_product/",
-        "--target=flutter", "--no-print-incremental-dependencies",
-        "-Ddart.vm.profile=false", "-Ddart.vm.product=true",
-        "--delete-tostring-package-uri=dart:ui", "--delete-tostring-package-uri=package:flutter",
-        "--aot", "--tfa", "--target-os", "ios",
-        "--packages", project.dir / ".dart_tool/package_config.json",
-        "--output-dill", out, "--verbosity=error",
-        f"package:{project.package}/main.dart",
-    ], cwd=project.dir, stdout=subprocess.DEVNULL)
+def assemble(project, frameworks):
+    """`flutter assemble` como lo invoca Xcode (xcode_backend.dart).
 
-
-def compile_aot(engine, dill, framework_dir, build_dir):
-    log("kernel -> App.framework arm64 (gen_snapshot en Darling)")
-    framework_dir.mkdir(parents=True, exist_ok=True)
-    darling.run_macos_tool(engine / "ios-release/gen_snapshot_arm64", [
-        "--deterministic", "--snapshot_kind=app-aot-macho-dylib",
-        f"--macho={framework_dir / 'App'}", f"--macho-object={build_dir / 'app.o'}",
-        f"--macho-min-os-version={config.MIN_IOS}",
-        "--macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks",
-        "--macho-install-name=@rpath/App.framework/App", dill,
-    ])
-    if not (framework_dir / "App").exists():
-        sys.exit("error: gen_snapshot no generó App.framework/App")
-
-
-def stub_app_framework(framework_dir, build_dir):
-    """En debug el código Dart va en kernel_blob.bin (JIT): App es un dylib vacío."""
-    log("App.framework stub (debug)")
-    framework_dir.mkdir(parents=True, exist_ok=True)
-    stub = build_dir / "debug_app.c"
-    stub.write_text("static const int Moo = 88;\n")
-    toolchain.dylib(stub, framework_dir / "App", "@rpath/App.framework/App", extra=["-fapplication-extension"])
-
-
-def assemble_debug(project, frameworks):
-    """Debug: `flutter assemble` como lo invoca Xcode (xcode_backend.dart).
-
-    Genera App.framework (stub + flutter_assets + kernel) y corre los hooks de
-    native assets, que necesitan SdkRoot y `xcrun` (support/core/bin/xcrun)."""
-    log("App.framework + flutter_assets + native assets (flutter assemble)")
+    Genera App.framework (debug: stub + kernel para JIT; release: Dart AOT con
+    gen_snapshot en Darling) + flutter_assets, y corre los hooks de native
+    assets, que necesitan SdkRoot y `xcrun` (support/core/bin/xcrun)."""
+    mode = "debug" if project.debug else "release"
+    log(f"App.framework + flutter_assets + native assets (flutter assemble, {mode})")
     out = project.build_dir / "assemble"
     run(["flutter", "--no-version-check", "assemble", f"--output={out}/",
          "-dTargetPlatform=ios", "-dIosArchs=arm64", "-dTargetFile=lib/main.dart",
-         "-dBuildMode=debug", "-dConfiguration=Debug", f"-dSdkRoot={config.IPHONE_SDK}",
-         "-dTrackWidgetCreation=true", "-dTreeShakeIcons=false", "-dDartObfuscation=false",
+         f"-dBuildMode={mode}", f"-dConfiguration={mode.capitalize()}", f"-dSdkRoot={config.IPHONE_SDK}",
+         f"-dTrackWidgetCreation={'true' if project.debug else 'false'}",
+         f"-dTreeShakeIcons={'false' if project.debug else 'true'}", "-dDartObfuscation=false",
          "-dSplitDebugInfo=", "-dAction=build", f"-dSrcRoot={project.ios}",
-         "debug_ios_bundle_flutter_assets"],
+         f"{mode}_ios_bundle_flutter_assets"],
         cwd=project.dir, capture_output=True, text=True)
     shutil.copytree(out / "App.framework", frameworks / "App.framework", symlinks=True, dirs_exist_ok=True)
     # Native assets (hooks de Dart, p. ej. objective_c por FFI): Xcode los embebe.
     for fw in (out / "native_assets").glob("*.framework"):
         shutil.copytree(fw, frameworks / fw.name, symlinks=True, dirs_exist_ok=True)
-
-
-def build_assets(project, out):
-    log("flutter_assets (flutter build bundle)")
-    run(["flutter", "build", "bundle", "--debug" if project.debug else "--release",
-         "--target-platform", "ios", "--asset-dir", out],
-        cwd=project.dir, stdout=subprocess.DEVNULL)
 
 
 def compile_runner(project, flutter_fw_parent, obj, executable):
@@ -188,13 +175,7 @@ def build(project_dir, debug=False):
     frameworks.mkdir(parents=True)
 
     run(["flutter", "pub", "get"], cwd=project.dir, stdout=subprocess.DEVNULL)
-    if debug:
-        assemble_debug(project, frameworks)
-    else:
-        dill = project.build_dir / "app.dill"
-        compile_kernel(flutter_root, project, dill)
-        compile_aot(engine, dill, app_framework, project.build_dir)
-        build_assets(project, app_framework / "flutter_assets")
+    assemble(project, frameworks)
     if plugins.swiftpm_plugins(project):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))
