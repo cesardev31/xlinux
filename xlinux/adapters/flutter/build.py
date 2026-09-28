@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ...core import app as appkit
 from ...core import config, deps, extensions, toolchain
-from ...core.util import log, output, run
+from ...core.util import DirLock, log, output, run
 from . import plugins
 
 ENGINE_BASE_URL = "https://storage.googleapis.com/flutter_infra_release/flutter"
@@ -207,6 +207,8 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
         deps.ensure_darling()  # gen_snapshot (Dart AOT) runs in Darling
     project = Project(project_dir, debug)
     project.dart_defines = list(dart_defines)
+    # Held until the process exits: installing reads the .app we build here.
+    project.lock = DirLock(project.build_dir, f"{project.package} ({'debug' if debug else 'release'})")
     flutter_root, revision = flutter_info()
     engine = ensure_engine(revision)
     link_engine_into_flutter_cache(flutter_root, engine)

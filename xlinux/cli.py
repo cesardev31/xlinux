@@ -50,6 +50,7 @@ def cmd_run(args):
     detect_adapter(args.project)
     project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args))
     device.install(project.ipa, device.first_device()[0])
+    project.lock.release()  # the logs below can run for hours
     flutter_debug.run_release(project)
 
 

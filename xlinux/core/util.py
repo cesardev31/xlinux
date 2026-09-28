@@ -1,3 +1,4 @@
+import fcntl
 import os
 import subprocess
 import sys
@@ -29,3 +30,30 @@ def output(cmd, **kw):
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     return run(cmd, **kw).stdout
+
+
+class DirLock:
+    """Exclusive lock on a build directory, held until release() or process
+    exit. Two builds of the same app at once (e.g. `flutter run` and `xlinux
+    build`) would delete and fill the same .app under each other: the second
+    one waits instead."""
+
+    def __init__(self, directory, what):
+        directory.mkdir(parents=True, exist_ok=True)
+        self.file = open(directory / ".xlinux.lock", "a+")
+        try:
+            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.file.seek(0)
+            holder = self.file.read().strip() or "?"
+            log(f"Waiting for another build of {what} to finish (pid {holder})")
+            fcntl.flock(self.file, fcntl.LOCK_EX)
+        self.file.seek(0)
+        self.file.truncate()
+        self.file.write(f"{os.getpid()}\n")
+        self.file.flush()
+
+    def release(self):
+        if not self.file.closed:
+            fcntl.flock(self.file, fcntl.LOCK_UN)
+            self.file.close()
