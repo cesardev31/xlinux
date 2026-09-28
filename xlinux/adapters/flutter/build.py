@@ -182,6 +182,7 @@ def build(project_dir, debug=False, package=True):
     if plugins.swiftpm_plugins(project):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))
+        plugins.pack_pod_resources(project, project.app)
     else:
         compile_runner(project, flutter_fw_parent, project.build_dir / "obj", project.app / "Runner")
 

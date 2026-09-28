@@ -20,7 +20,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from ...core import config, toolchain
+from ...core import cocoapods, config, toolchain
 from ...core.util import log
 
 GENERATED = "FlutterGeneratedPluginSwiftPackage"
@@ -28,22 +28,25 @@ FRAMEWORK_PKG = "FlutterFramework"
 
 
 def swiftpm_plugins(project):
-    """[(nombre, ruta al paquete Swift)] de los plugins iOS con Package.swift."""
+    """[(nombre, basename, paquete)] de los plugins iOS nativos. `paquete` es la
+    carpeta con Package.swift o, si el plugin solo trae podspec, el .podspec
+    (se convierte con core/cocoapods)."""
     deps_file = project.dir / ".flutter-plugins-dependencies"
     if not deps_file.exists():
         return []
     plugins = json.loads(deps_file.read_text()).get("plugins", {}).get("ios", [])
     found = []
     for plugin in plugins:
+        root = Path(plugin["path"])
         for platform_dir in ("ios", "darwin"):
-            package = Path(plugin["path"]) / platform_dir / plugin["name"]
+            package = root / platform_dir / plugin["name"]
             if (package / "Package.swift").exists():
-                found.append((plugin["name"], Path(plugin["path"]).name, package))
+                found.append((plugin["name"], root.name, package))
                 break
         else:
-            if plugin.get("native_build", True) and _has_native_code(Path(plugin["path"])):
-                sys.exit(f"error: el plugin {plugin['name']} solo soporta CocoaPods (sin Package.swift); "
-                         "todavía no está soportado.")
+            podspecs = [p for d in ("ios", "darwin") for p in (root / d).glob("*.podspec")]
+            if podspecs and _has_native_code(root):
+                found.append((plugin["name"], root.name, podspecs[0]))
     return found
 
 
@@ -89,8 +92,13 @@ let package = Package(
 """)
     _write(rel / FRAMEWORK_PKG / f"Sources/{FRAMEWORK_PKG}/{FRAMEWORK_PKG}.swift", "")
 
+    pod_resources = []
     for name, basename, package in plugins:
-        _symlink(rel / basename, package)
+        if package.suffix == ".podspec":
+            pod_resources += _generate_from_podspec(name, package, rel / basename, packages / ".pods")
+        else:
+            _symlink(rel / basename, package)
+    (spm_dir / "pod_resources.json").write_text(json.dumps(pod_resources))
     package_deps = [f'        .package(name: "{name}", path: "../.packages/{basename}"),'
                     for name, basename, _ in plugins]
     package_deps.append(f'        .package(name: "{FRAMEWORK_PKG}", path: "../.packages/{FRAMEWORK_PKG}"),')
@@ -120,6 +128,33 @@ let package = Package(
 """)
     _write(packages / GENERATED / f"Sources/{GENERATED}/{GENERATED}.swift", "")
     return plugins
+
+
+def _generate_from_podspec(name, podspec, dest, pods_dir):
+    """Plugin solo con CocoaPods: su podspec y el de sus dependencias pasan a
+    paquetes SwiftPM (core/cocoapods). Devuelve los recursos a empaquetar."""
+    log(f"Convirtiendo {name} (CocoaPods) a SwiftPM")
+    spec = cocoapods.parse_ruby_podspec(podspec)
+    root_pod, pods = cocoapods.load_graph(spec, podspec.parent)
+    for pod in pods:
+        if pod is not root_pod:
+            cocoapods.write_package(pod, pods_dir / pod.package_dir_name)
+    if dest.is_symlink():
+        dest.unlink()
+    # El plugin, como los de SwiftPM: producto con guiones, dependiente de
+    # FlutterFramework (Flutter.framework llega por -F).
+    cocoapods.write_package(root_pod, dest, deps_base="../../.pods/",
+                            extra_deps=[(FRAMEWORK_PKG, f"../{FRAMEWORK_PKG}")],
+                            product=name.replace("_", "-"))
+    return cocoapods.resource_manifest(pods)
+
+
+def pack_pod_resources(project, app):
+    """Bundles de recursos de los pods convertidos, como los deja CocoaPods."""
+    mode = "debug" if project.debug else "release"
+    manifest = project.dir / f"build/ios-linux-spm-{mode}/pod_resources.json"
+    if manifest.exists():
+        cocoapods.pack_resources(json.loads(manifest.read_text()), app)
 
 
 def generate_runner(project, spm_dir):
@@ -206,7 +241,9 @@ def build(project, flutter_fw_parent):
     # Los plugins hacen `import Flutter`: en Xcode Flutter.framework llega por
     # FRAMEWORK_SEARCH_PATHS, aquí por -F en todos los targets.
     fw = str(flutter_fw_parent)
-    shallow = [dep for _, _, package in plugins for dep in toolchain.exact_dependencies(package)]
+    # Los plugins convertidos desde CocoaPods ya tienen sus pods bajados por nosotros.
+    shallow = [dep for _, _, package in plugins if package.suffix != ".podspec"
+               for dep in toolchain.exact_dependencies(package)]
     out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=f"{project.package}-{mode}", shallow=shallow, extra_flags=[
         "-Xswiftc", "-F", "-Xswiftc", fw, "-Xcc", f"-F{fw}",
         "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter"])
@@ -226,14 +263,17 @@ def native_fingerprint(project, spm_dir, plugins, flutter_fw_parent):
     h.update(f"{project.debug}|{flutter_fw_parent}".encode())
     for name, basename, package in plugins:
         h.update(f"{name}|{basename}|{package}".encode())
+        if package.suffix == ".podspec":
+            package = package.parent
         # Un plugin en desarrollo (path:) puede cambiar sin cambiar de versión.
         for f in sorted(package.rglob("*")):
             if f.is_file() and f.suffix in (".swift", ".m", ".mm", ".h", ".c", ".cpp") or f.name == "Package.swift":
                 h.update(str(f).encode())
                 h.update(str(f.stat().st_mtime_ns).encode())
     generated = [spm_dir / "Runner/Package.swift", *sorted((spm_dir / "Runner/Sources").rglob("*")),
-                 *sorted((spm_dir / "Packages").glob("*/Package.swift"))]
-    tools = [Path(__file__), Path(toolchain.__file__), config.SUPPORT / "core/bin/actool"]
+                 *sorted((spm_dir / "Packages").glob("*/Package.swift")),
+                 *sorted((spm_dir / "Packages").glob(".*/*/Package.swift"))]
+    tools = [Path(__file__), Path(toolchain.__file__), Path(cocoapods.__file__), config.SUPPORT / "core/bin/actool"]
     for f in generated + tools:
         if f.is_file():
             h.update(str(f.relative_to(spm_dir) if f.is_relative_to(spm_dir) else f).encode())

@@ -37,7 +37,8 @@ app Flutter real en producción (Volaré).
 | iPhone visible en `flutter devices` / VS Code | ✅ |
 | Native assets (hooks de Dart, p. ej. `objective_c`) en debug y release | ✅ |
 | Plugins nativos por SwiftPM: firebase_core, google_sign_in (login con Google), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
-| Plugins solo con CocoaPods | ❌ |
+| Plugins solo con CocoaPods (conversión podspec → SwiftPM, sin Ruby): pods en Swift + xcframeworks, p. ej. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ compila |
+| Pods con Objective-C/C | ❌ |
 | Otros frameworks (Expo / React Native) | 🔜 |
 
 ## Cómo funciona
@@ -46,6 +47,7 @@ app Flutter real en producción (Volaré).
 |---|---|
 | `gen_snapshot` (Dart AOT → ARM64) | el binario de macOS de Flutter corriendo en **Darling**, con `support/core/darling_compat.c` (finge macOS 12 en `uname` y emula `vm_map` alineado, que Darling no soporta y tumbaba el GC de Dart) |
 | Xcode compila Runner (Swift/ObjC) | `swiftc`/`clang` + SDK de iOS extraído de `Xcode.xip` por **xtool** |
+| CocoaPods (`pod install`) | `xlinux/core/cocoapods.py`: lee podspecs (Ruby mínimo para los locales, JSON del CDN para los de terceros), resuelve versiones, baja el código sin historial y genera un `Package.swift` por pod; los `resource_bundles` se arman como CocoaPods (actool incluido) |
 | Xcode + SwiftPM compilan plugins | **Swift Build** (SwiftPM 6.4) con el toolset de xtool; se genera el mismo `FlutterGeneratedPluginSwiftPackage` que en macOS y el Runner como ejecutable SwiftPM |
 | `xcrun`, `clang`, `lipo`, `otool`, `install_name_tool`, `codesign` | `support/core/bin/`: xcrun propio, clang que deduce `-target` como el de Apple, herramientas de LLVM, codesign no-op (firma xtool al final) |
 | `actool` (asset catalogs → `Assets.car`) | `support/core/bin/actool`: imagesets a PNG sueltos (`nombre@2x.png`), SVG/PDF rasterizados (cairosvg / pdftocairo), AppIcon → `CFBundleIcons` |
@@ -61,6 +63,7 @@ app Flutter real en producción (Volaré).
 ```
 xlinux/core/               agnóstico al framework
   toolchain.py             swiftc/clang/Swift Build para iOS, mirrors git sin historial
+  cocoapods.py             podspec → SwiftPM (sin Ruby ni `pod install`)
   app.py                   .app/.ipa sin ibtool/actool (Info.plist, íconos, recursos)
   darling.py               correr herramientas CLI de macOS
   device.py                detectar, instalar, lanzar, capturar; DebugSession (DVT + debugserver + lldb)
@@ -188,6 +191,12 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 - Las copias de SwiftPM son de solo lectura: `actool` no debe copiar permisos.
 - `flutter assemble` release deja App.framework universal: se adelgaza con `lipo -thin`
   como hace Xcode ("embed and thin").
+- CocoaPods sin Ruby: el CDN (`cdn.cocoapods.org`) rechaza el User-Agent por defecto de
+  Python (403). El target de cada pod es una carpeta con enlaces solo a sus fuentes: si
+  apunta al repo completo, SwiftPM toma como recursos los de las apps de ejemplo. Los
+  pods buscan sus bundles en la raíz del .app (`Bundle.main`), no en los de SwiftPM.
+- Solo se embeben en `Frameworks/` los Mach-O MH_DYLIB: xcframeworks estáticos (p. ej.
+  TensorFlowLiteC, MH_OBJECT) ya quedan dentro del ejecutable.
 - El AppImage de xtool no monta FUSE cuando lo lanza el snap de Flutter → se usa extraído.
 
 ## Limitaciones conocidas
@@ -206,7 +215,7 @@ visual → interacción → snapshot` desde cualquier agente con acceso al shell
 
 1. Cambios de Dart sin reinstalar (subir el kernel al contenedor de la app y lanzar con
    `--flutter-assets-dir`).
-2. Plugins solo-CocoaPods (podspec → Package.swift).
+2. Pods con Objective-C/C en la conversión de CocoaPods.
 3. Adaptador Expo / React Native: `expo prebuild` + CocoaPods; el debug es más simple
    (Hermes no usa JIT, Metro por la red), el build es más difícil (Pods.xcodeproj).
 

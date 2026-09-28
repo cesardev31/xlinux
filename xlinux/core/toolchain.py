@@ -138,12 +138,29 @@ def thin_frameworks(app, arch="arm64"):
             run(["lipo", "-thin", arch, binary, "-output", binary], capture_output=True, text=True)
 
 
-def _is_static_archive(binary):
+MH_DYLIB = 6
+
+
+def _is_dynamic_library(binary):
+    """True solo para Mach-O MH_DYLIB (o universales cuyo primer slice lo es).
+    Los frameworks estáticos (archivos .a o MH_OBJECT) ya quedan enlazados
+    dentro del ejecutable y no se embeben en Frameworks/."""
     try:
         with open(binary, "rb") as f:
-            return f.read(8) in (b"!<arch>\n", b"!<thin>\n")
+            head = f.read(8)
+            if head[:4] in FAT_MAGICS:  # universal (big-endian): primer slice
+                f.seek(8 + 8)
+                offset = int.from_bytes(f.read(4), "big")
+                f.seek(offset)
+                head = f.read(8)
+            elif head[:8] in (b"!<arch>\n", b"!<thin>\n"):
+                return False
+            if head[:4] not in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe"):
+                return False
+            f.seek(f.tell() - 8 + 12)
+            return int.from_bytes(f.read(4), "little") == MH_DYLIB
     except OSError:
-        return True
+        return False
 
 
 def pack_swiftpm_outputs(out, app, executable, skip_frameworks=()):
@@ -155,7 +172,7 @@ def pack_swiftpm_outputs(out, app, executable, skip_frameworks=()):
     frameworks = app / "Frameworks"
     frameworks.mkdir(exist_ok=True)
     for fw in out.glob("*.framework"):
-        if fw.stem not in skip_frameworks and not _is_static_archive(fw / fw.stem):
+        if fw.stem not in skip_frameworks and _is_dynamic_library(fw / fw.stem):
             shutil.copytree(fw, frameworks / fw.name, symlinks=True, dirs_exist_ok=True)
     for lib in out.glob("lib*.dylib"):
         shutil.copy(lib, frameworks / lib.name)
