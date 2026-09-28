@@ -168,6 +168,9 @@ An agent can close the loop by itself: edit code → hot reload → screenshot �
 tap/navigate → verify. Use it with apps under development: the agent can touch
 anything on the phone.
 
+For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
+[`skills/xlinux/`](skills/xlinux/SKILL.md) (copy it to `~/.claude/skills/xlinux/`).
+
 ## Hard-won details (so nobody has to rediscover them)
 
 **Debugging**
