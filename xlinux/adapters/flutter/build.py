@@ -6,6 +6,7 @@
 then:     Runner (+ plugins via SwiftPM), Runner.app, .ipa
 """
 
+import base64
 import json
 import plistlib
 import re
@@ -34,6 +35,7 @@ class Project:
         self.ios = self.dir / "ios"
         self.package = re.search(r"^name:\s*(\S+)", (self.dir / "pubspec.yaml").read_text(), re.M).group(1)
         self.debug = debug
+        self.dart_defines = []
         self.build_dir = self.dir / ("build/ios-linux-debug" if debug else "build/ios-linux")
         self.app = self.build_dir / "Runner.app"
         self.ipa = self.build_dir / f"{self.package}.ipa"
@@ -131,6 +133,8 @@ def assemble(project, frameworks):
          f"-dTrackWidgetCreation={'true' if project.debug else 'false'}",
          f"-dTreeShakeIcons={'false' if project.debug else 'true'}", "-dDartObfuscation=false",
          "-dSplitDebugInfo=", "-dAction=build", f"-dSrcRoot={project.ios}",
+         # Same encoding as flutter_tools: each KEY=VALUE in base64, comma-separated.
+         "-dDartDefines=" + ",".join(base64.b64encode(d.encode()).decode() for d in project.dart_defines),
          f"{mode}_ios_bundle_flutter_assets"],
         cwd=project.dir, capture_output=True, text=True)
     shutil.copytree(out / "App.framework", frameworks / "App.framework", symlinks=True, dirs_exist_ok=True)
@@ -173,15 +177,36 @@ def flutter_run_kernel(project_dir):
     return kernel if kernel.exists() else None
 
 
-def build(project_dir, debug=False, package=True, kernel=None):
+def read_dart_defines(defines=(), files=()):
+    """--dart-define KEY=VALUE values plus --dart-define-from-file ones (a JSON
+    object or a .env file), as flutter accepts them."""
+    result = []
+    for path in files:
+        text = Path(path).read_text()
+        if Path(path).suffix == ".json":
+            values = json.loads(text)
+        else:
+            values = dict(line.split("=", 1) for line in text.splitlines()
+                          if "=" in line and not line.lstrip().startswith("#"))
+        result += [f"{k.strip()}={v.strip() if isinstance(v, str) else json.dumps(v)}" for k, v in values.items()]
+    for define in defines:
+        if "=" not in define:
+            sys.exit(f"error: --dart-define expects KEY=VALUE, got {define!r}")
+        result.append(define)
+    return result
+
+
+def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
     """Build the app and return the Project with Runner.app (and the .ipa if
     `package`; installing on the iPhone only needs the uncompressed .app).
-    `kernel`: debug kernel to ship instead of the one `flutter assemble` makes."""
+    `kernel`: debug kernel to ship instead of the one `flutter assemble` makes.
+    `dart_defines`: KEY=VALUE strings, like `flutter build --dart-define`."""
     config.require_data_dir()
     toolchain.require_sdk()
     if not debug:
         deps.ensure_darling()  # gen_snapshot (Dart AOT) runs in Darling
     project = Project(project_dir, debug)
+    project.dart_defines = list(dart_defines)
     flutter_root, revision = flutter_info()
     engine = ensure_engine(revision)
     link_engine_into_flutter_cache(flutter_root, engine)

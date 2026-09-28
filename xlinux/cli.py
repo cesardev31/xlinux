@@ -28,16 +28,27 @@ def cmd_doctor(_args):
     setup.doctor(ADAPTERS)
 
 
+def _dart_defines(args):
+    return flutter_build.read_dart_defines(args.dart_define, args.dart_define_from_file)
+
+
+def _add_dart_define_options(p):
+    p.add_argument("--dart-define", action="append", default=[], metavar="KEY=VALUE",
+                   help="like flutter's --dart-define (repeatable)")
+    p.add_argument("--dart-define-from-file", action="append", default=[], metavar="FILE",
+                   help="like flutter's --dart-define-from-file (.json or .env, repeatable)")
+
+
 def cmd_build(args):
     detect_adapter(args.project)
-    project = flutter_build.build(args.project, debug=args.debug)
+    project = flutter_build.build(args.project, debug=args.debug, dart_defines=_dart_defines(args))
     if args.install:
         device.install(project.ipa, device.first_device()[0])
 
 
 def cmd_run(args):
     detect_adapter(args.project)
-    project = flutter_build.build(args.project, debug=False)
+    project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args))
     device.install(project.ipa, device.first_device()[0])
     flutter_debug.run_release(project)
 
@@ -125,10 +136,12 @@ def main():
     p.add_argument("--project", default=".", help="project directory (default: current directory)")
     p.add_argument("--debug", action="store_true", help="debug mode (JIT, for hot reload)")
     p.add_argument("--install", action="store_true", help="sign and install on the iPhone")
+    _add_dart_define_options(p)
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("run", help="build in release mode, install, launch and stream logs")
     p.add_argument("--project", default=".")
+    _add_dart_define_options(p)
     p.set_defaults(func=cmd_run)
 
     sub.add_parser("mcp", help="MCP server so an AI agent can see and drive the iPhone").set_defaults(func=cmd_mcp)
