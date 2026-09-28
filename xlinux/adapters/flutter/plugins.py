@@ -77,7 +77,7 @@ def generate(project, spm_dir):
     # FlutterFramework: en Xcode es un target vacío; los plugins solo lo usan
     # como dependencia y encuentran Flutter.framework por FRAMEWORK_SEARCH_PATHS.
     _write(rel / FRAMEWORK_PKG / "Package.swift", f"""// swift-tools-version: 5.9
-// Generado por flutter-ios-linux. No editar.
+// Generado por xlinux. No editar.
 import PackageDescription
 
 let package = Package(
@@ -97,7 +97,7 @@ let package = Package(
                    for name, _, _ in plugins]
     target_deps.append(f'                .product(name: "{FRAMEWORK_PKG}", package: "{FRAMEWORK_PKG}"),')
     _write(packages / GENERATED / "Package.swift", f"""// swift-tools-version: 5.9
-// Generado por flutter-ios-linux. No editar.
+// Generado por xlinux. No editar.
 import PackageDescription
 
 let package = Package(
@@ -150,7 +150,7 @@ def generate_runner(project, spm_dir):
     shutil.copy(config.SUPPORT / "flutter/FlutterLinuxSceneDelegate.swift", swift_dir)
 
     _write(pkg / "Package.swift", f"""// swift-tools-version: 5.9
-// Generado por flutter-ios-linux. No editar.
+// Generado por xlinux. No editar.
 import PackageDescription
 
 let package = Package(

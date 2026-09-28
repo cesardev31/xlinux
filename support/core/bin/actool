@@ -25,15 +25,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from fil.core import config  # noqa: E402
+from xlinux.core import config  # noqa: E402
 
 # cairosvg vive en el venv del directorio de datos: re-ejecutarse con ese Python.
 try:
     import cairosvg
 except ImportError:
     venv_python = config.data_dir() / "py-tools/bin/python"
-    if venv_python.exists() and sys.executable != str(venv_python) and not os.environ.get("FIL_ACTOOL_REEXEC"):
-        os.environ["FIL_ACTOOL_REEXEC"] = "1"
+    if venv_python.exists() and sys.executable != str(venv_python) and not os.environ.get("XLINUX_ACTOOL_REEXEC"):
+        os.environ["XLINUX_ACTOOL_REEXEC"] = "1"
         os.execv(str(venv_python), [str(venv_python), __file__, *sys.argv[1:]])
     cairosvg = None
 
@@ -199,7 +199,7 @@ def main(argv):
         return 0
     opts = parse(argv)
     if not opts["compile"]:
-        print("error: actool (flutter-ios-linux) solo soporta --compile", file=sys.stderr)
+        print("error: actool (xlinux) solo soporta --compile", file=sys.stderr)
         return 1
     out = Path(opts["compile"])
     out.mkdir(parents=True, exist_ok=True)

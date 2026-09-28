@@ -159,7 +159,7 @@ def screenshot(path, udid):
 
 def screenshot_base64(udid):
     """Captura PNG codificada para el protocolo de custom devices de Flutter."""
-    with tempfile.TemporaryDirectory(prefix="fil-screenshot-") as directory:
+    with tempfile.TemporaryDirectory(prefix="xlinux-screenshot-") as directory:
         path = screenshot(Path(directory) / "iphone.png", udid)
         return base64.b64encode(path.read_bytes()).decode("ascii")
 
@@ -278,10 +278,10 @@ class DebugSession:
             control.close()
             sys.exit(f"error: iOS no lanzó la app: {response.get('error', 'sin respuesta')}")
 
-        self.stop_file = tempfile.mktemp(prefix="fil-stop-")
+        self.stop_file = tempfile.mktemp(prefix="xlinux-stop-")
         env = config.tool_env()
-        env["FIL_STOP_FILE"] = self.stop_file
-        env["FIL_ARGS"] = json.dumps({
+        env["XLINUX_STOP_FILE"] = self.stop_file
+        env["XLINUX_ARGS"] = json.dumps({
             "helpers": self.lldb_helpers, "local_app": str(self.local_app), "pid": response["pid"],
             "debugserver": debugserver, "remote_app": remote_app})
         self.lldb = subprocess.Popen(
@@ -303,7 +303,7 @@ class DebugSession:
             line = process.stdout.readline()
             if not line:
                 sys.exit(f"error: {what} terminó antes de tiempo")
-            if os.environ.get("FIL_VERBOSE"):
+            if os.environ.get("XLINUX_VERBOSE"):
                 print(line.rstrip(), file=sys.stderr, flush=True)
             key, sep, value = line.strip().partition("=")
             if sep and key.isupper():
@@ -317,7 +317,7 @@ class DebugSession:
     def wait(self):
         """Muestra la salida de lldb hasta que la app termine."""
         for line in self.lldb.stdout:
-            if line.startswith("[lldb]") or os.environ.get("FIL_VERBOSE"):
+            if line.startswith("[lldb]") or os.environ.get("XLINUX_VERBOSE"):
                 print(line.rstrip(), file=sys.stderr, flush=True)
         self.lldb.wait()
 

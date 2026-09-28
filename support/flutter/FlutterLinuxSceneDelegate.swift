@@ -1,4 +1,4 @@
-// Generado por flutter-ios-linux. No editar.
+// Generado por xlinux. No editar.
 //
 // En Linux no existe ibtool, así que no se puede compilar Main.storyboard.
 // Esta subclase del SceneDelegate del proyecto crea por código la ventana con

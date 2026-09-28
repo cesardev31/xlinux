@@ -5,9 +5,9 @@ engine llama a NOTIFY_DEBUGGER_ABOUT_RX_PAGES y el helper de Flutter
 (flutter_lldb_helper.py) toca esas páginas desde lldb. Este script corre
 dentro del Python de lldb:
 
-  FIL_ARGS='{...}' lldb --batch -o "command script import lldb_driver.py"
+  XLINUX_ARGS='{...}' lldb --batch -o "command script import lldb_driver.py"
 
-FIL_ARGS (JSON) = {"helpers": [...], "local_app": ..., "pid": ..., "debugserver": "host:puerto",
+XLINUX_ARGS (JSON) = {"helpers": [...], "local_app": ..., "pid": ..., "debugserver": "host:puerto",
                    "remote_app": ruta del .app en el iPhone}
 
 En iOS 17+ debugserver no puede lanzar apps: device_bridge.py la lanza
@@ -89,7 +89,7 @@ def run(debugger, helpers, local_app, pid, debugserver, remote_app):
     # en NOTIFY_DEBUGGER_ABOUT_RX_PAGES). En asíncrono eso solo pasa si alguien
     # consume el evento, y la app se quedaba congelada (pantalla negra).
     debugger.SetAsync(False)
-    stop_file = os.environ.get("FIL_STOP_FILE")
+    stop_file = os.environ.get("XLINUX_STOP_FILE")
 
     def watch_stop_file():
         while process.IsValid() and process.GetState() not in (lldb.eStateExited, lldb.eStateDetached):
@@ -114,7 +114,7 @@ def run(debugger, helpers, local_app, pid, debugserver, remote_app):
         if state != lldb.eStateStopped:
             continue
         reasons = [(t, t.GetStopReason()) for t in process if t.GetStopReason() != lldb.eStopReasonNone]
-        if os.environ.get("FIL_VERBOSE"):
+        if os.environ.get("XLINUX_VERBOSE"):
             for t, _ in reasons:
                 print(f"[lldb] parada hilo {t.GetIndexID()}: {t.GetStopDescription(200)} "
                       f"en {t.GetFrameAtIndex(0).GetFunctionName()}", flush=True)
@@ -124,9 +124,9 @@ def run(debugger, helpers, local_app, pid, debugserver, remote_app):
 
 
 def __lldb_init_module(debugger, _dict):
-    args = json.loads(os.environ.get("FIL_ARGS", "{}"))
+    args = json.loads(os.environ.get("XLINUX_ARGS", "{}"))
     if not args:
-        print("[lldb] falta FIL_ARGS")
+        print("[lldb] falta XLINUX_ARGS")
         return
     try:
         run(debugger, args["helpers"], args["local_app"], args["pid"], args["debugserver"], args["remote_app"])

@@ -88,7 +88,7 @@ def doctor(adapters):
     ok &= _check(bool(which("xtool")), "xtool", "descarga el AppImage a ~/.local/bin/xtool")
     ok &= _check(config.IPHONE_SDK.exists(), "SDK de iOS (xtool)", "corre `xtool setup` con Xcode.xip")
     ok &= _check(bool(which("darling")), "Darling", "instala los .deb de darling-core/system/cli")
-    ok &= _check(config.compat_shim().exists(), "shim de Darling", "corre `flutter-ios-linux setup`")
+    ok &= _check(config.compat_shim().exists(), "shim de Darling", "corre `xlinux setup`")
     ok &= _check(config.pymobiledevice3_python().exists(), "pymobiledevice3",
                  "UV_TOOL_DIR=<datos>/uv-tools uv tool install pymobiledevice3")
 

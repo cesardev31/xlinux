@@ -12,7 +12,7 @@ def log(msg):
 def run(cmd, check=True, **kw):
     """Corre un comando con el entorno de la herramienta; aborta si falla."""
     cmd = [str(c) for c in cmd]
-    if os.environ.get("FIL_VERBOSE"):
+    if os.environ.get("XLINUX_VERBOSE"):
         print("   $ " + " ".join(cmd), file=sys.stderr, flush=True)
     kw.setdefault("env", config.tool_env())
     result = subprocess.run(cmd, **kw)

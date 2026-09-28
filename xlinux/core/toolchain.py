@@ -16,7 +16,7 @@ def target():
 def require_sdk():
     for path in (config.IPHONE_SDK, config.TOOLSET_BIN):
         if not path.exists():
-            sys.exit(f"error: falta {path}. Corre `xtool setup` (ver `flutter-ios-linux doctor`).")
+            sys.exit(f"error: falta {path}. Corre `xtool setup` (ver `xlinux doctor`).")
 
 
 # El lld del toolchain de Swift es más viejo que el SDK de iOS 27: se usa el de

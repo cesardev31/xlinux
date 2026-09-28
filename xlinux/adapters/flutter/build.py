@@ -69,15 +69,16 @@ def ensure_engine(revision):
 
 
 GEN_SNAPSHOT_WRAPPER = """#!/usr/bin/env python3
-# Generado por flutter-ios-linux. El gen_snapshot de iOS solo existe para
+# Generado por xlinux. El gen_snapshot de iOS solo existe para
 # macOS: `flutter assemble` (release/profile) lo llama y aquí corre en Darling.
 import sys
 sys.path.insert(0, {repo!r})
-from fil.core import darling
+from xlinux.core import darling
 result = darling.run_macos_tool({real!r}, sys.argv[1:], capture_output=False, check=False)
 sys.exit(result.returncode)
 """
-MARKER = ".flutter-ios-linux"
+MARKER = ".xlinux"
+LEGACY_MARKER = ".flutter-ios-linux"  # nombre anterior del proyecto
 
 
 def link_engine_into_flutter_cache(flutter_root, engine):
@@ -94,7 +95,8 @@ def link_engine_into_flutter_cache(flutter_root, engine):
             debug.symlink_to(engine / "ios")
 
     release = cache / "ios-release"
-    if release.exists() and not release.is_symlink() and not (release / MARKER).exists():
+    ours = any((release / m).exists() for m in (MARKER, LEGACY_MARKER))
+    if release.exists() and not release.is_symlink() and not ours:
         return  # precache real
     if release.is_symlink():
         release.unlink()

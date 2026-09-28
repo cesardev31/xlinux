@@ -2,7 +2,7 @@
 """clang que se comporta como el de Xcode para compilar para iOS.
 
 - Usa el linker de xtool: el lld del toolchain de Swift es más viejo que el
-  SDK de iOS 27 (ver fil/core/toolchain.py).
+  SDK de iOS 27 (ver xlinux/core/toolchain.py).
 - El clang de Apple deduce el target de `-arch` + `-m<plataforma>-version-min`
   (o del -isysroot); el de Linux asumiría x86_64-linux, así que si no viene
   `-target` se deduce aquí.
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from fil.core import config  # noqa: E402
+from xlinux.core import config  # noqa: E402
 
 args = sys.argv[1:]
 

@@ -26,7 +26,7 @@ def translate(arg):
 def run_macos_tool(binary, args, **kw):
     shim = config.compat_shim()
     if not shim.exists():
-        sys.exit("error: falta el shim de Darling. Corre `flutter-ios-linux setup`.")
+        sys.exit("error: falta el shim de Darling. Corre `xlinux setup`.")
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     return run(["darling", "shell", "env", f"DYLD_INSERT_LIBRARIES={ROOT}{shim}",

@@ -1,0 +1,49 @@
+diff --git a/Sources/PreviewsMacros/Macros.swift b/Sources/PreviewsMacros/Macros.swift
+index 4fcfa82..c59c358 100644
+--- a/Sources/PreviewsMacros/Macros.swift
++++ b/Sources/PreviewsMacros/Macros.swift
+@@ -6,6 +6,9 @@ import OpenAppleMacrosBase
+ package var all: [Macro.Type] {
+     [
+         SwiftUIView.self,
++        KitViewMacro.self,
++        Common.self,
++        PreviewCommonGroup.self,
+         Previewable.self,
+     ]
+ }
+@@ -19,6 +22,34 @@ struct SwiftUIView: DeclarationMacro {
+     }
+ }
+ 
++// Variantes de #Preview para UIKit (UIView / UIViewController) y comunes.
++struct KitViewMacro: DeclarationMacro {
++    static func expansion(
++        of node: some FreestandingMacroExpansionSyntax,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        return []
++    }
++}
++
++struct Common: DeclarationMacro {
++    static func expansion(
++        of node: some FreestandingMacroExpansionSyntax,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        return []
++    }
++}
++
++struct PreviewCommonGroup: DeclarationMacro {
++    static func expansion(
++        of node: some FreestandingMacroExpansionSyntax,
++        in context: some MacroExpansionContext
++    ) throws -> [DeclSyntax] {
++        return []
++    }
++}
++
+ struct Previewable: PeerMacro {
+     static func expansion(
+         of node: AttributeSyntax,

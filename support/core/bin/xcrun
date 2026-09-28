@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from fil.core import config  # noqa: E402
+from xlinux.core import config  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 SDK = config.XTOOL_SDK / "Developer/Platforms"
@@ -29,7 +29,7 @@ def find(name):
     swift = config.swift_bin()
     llvm = Path("/usr/lib/llvm-21/bin")
     tools = {
-        # clang con el linker de xtool (ver fil/core/toolchain.py)
+        # clang con el linker de xtool (ver xlinux/core/toolchain.py)
         "clang": HERE / "apple-clang", "clang++": HERE / "apple-clang++", "cc": HERE / "apple-clang",
         "c++": HERE / "apple-clang++",
         "ld": config.TOOLSET_BIN / "ld64.lld",

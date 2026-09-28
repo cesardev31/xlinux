@@ -22,11 +22,11 @@ FLUTTER_CUSTOM_DEVICES = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".
 
 
 def device_config():
-    cli = str(config.REPO / "bin/flutter-ios-linux")
+    cli = str(config.REPO / "bin/xlinux")
     return {
         "id": DEVICE_ID,
-        "label": "iPhone (flutter-ios-linux)",
-        "sdkNameAndVersion": "iOS vía flutter-ios-linux",
+        "label": "iPhone (xlinux)",
+        "sdkNameAndVersion": "iOS vía xlinux",
         "platform": "linux-x64",
         "enabled": True,
         "ping": [cli, "device", "ping"],

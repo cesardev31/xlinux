@@ -14,7 +14,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 SUPPORT = REPO / "support"
-CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "flutter-ios-linux/config.json"
+CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "xlinux/config.json"
 DEFAULT_DATA_DIR = "/run/media/cesar/games/ios-dev"
 
 MIN_IOS = "15.0"
@@ -25,11 +25,17 @@ SWIFT_RESOURCES = XTOOL_SDK / "Developer/Toolchains/XcodeDefault.xctoolchain/usr
 TOOLSET_BIN = XTOOL_SDK / "toolset/bin"
 
 
+# Nombre anterior del proyecto: se sigue leyendo su configuración si no hay una nueva.
+LEGACY_CONFIG_FILE = CONFIG_FILE.parent.parent / "flutter-ios-linux/config.json"
+
+
 def load_config():
-    try:
-        return json.loads(CONFIG_FILE.read_text())
-    except (OSError, ValueError):
-        return {}
+    for path in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 def save_config(values):
@@ -38,7 +44,7 @@ def save_config(values):
 
 
 def data_dir():
-    return Path(os.environ.get("FIL_DATA") or load_config().get("data_dir") or DEFAULT_DATA_DIR)
+    return Path(os.environ.get("XLINUX_DATA") or load_config().get("data_dir") or DEFAULT_DATA_DIR)
 
 
 def require_data_dir():

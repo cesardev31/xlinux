@@ -91,7 +91,7 @@ def cmd_agent_input(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="flutter-ios-linux",
+        prog="xlinux",
         description="Compila, instala y depura apps en iPhone desde Linux.",
         epilog="Flutter en debug con hot reload: `flutter run -d iphone-linux` o elige el iPhone en VS Code.",
     )
@@ -136,7 +136,7 @@ def main():
     p = dsub.add_parser("agent", help="acciones JSON para agentes de desarrollo")
     agent = p.add_subparsers(dest="agent_command", required=True)
     p = agent.add_parser("snapshot", help="capturar PNG y devolver ruta/dimensiones como JSON")
-    p.add_argument("output", nargs="?", default="/tmp/flutter-ios-linux/screen.png")
+    p.add_argument("output", nargs="?", default="/tmp/xlinux/screen.png")
     p.set_defaults(func=cmd_agent_snapshot)
     p = agent.add_parser("tap", help="tocar coordenadas normalizadas 0..1")
     p.add_argument("x", type=float)
