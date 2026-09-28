@@ -16,6 +16,7 @@ flutter run -d iphone-linux        # debug + hot reload (o elige el iPhone en VS
 xlinux run                         # release: compila, instala, abre y muestra logs
 xlinux build [--debug] [--install] [--project DIR]
 xlinux doctor                      # diagnóstico
+xlinux mcp                         # servidor MCP para agentes (ver abajo)
 xlinux setup                       # preparar el entorno (una vez)
 xlinux device screenshot iphone.png
 xlinux device mirror               # visor web en 127.0.0.1:8080
@@ -64,6 +65,7 @@ app Flutter real en producción (Volaré).
 xlinux/core/               agnóstico al framework
   toolchain.py             swiftc/clang/Swift Build para iOS, mirrors git sin historial
   cocoapods.py             podspec → SwiftPM (sin Ruby ni `pod install`)
+xlinux/mcp_server.py       servidor MCP (captura, toques, texto, botones, apps, hot reload, logs)
   app.py                   .app/.ipa sin ibtool/actool (Info.plist, íconos, recursos)
   darling.py               correr herramientas CLI de macOS
   device.py                detectar, instalar, lanzar, capturar; DebugSession (DVT + debugserver + lldb)
@@ -95,6 +97,7 @@ por ejemplo un SSD externo:
 | xtool | AppImage en `~/.local/bin/xtool`; `xtool setup` con `Xcode_27.xip` (lo descargas tú con tu Apple ID) |
 | Darling | `.deb` de `darling-core`, `darling-system`, `darling-cli` |
 | pymobiledevice3 | `UV_TOOL_DIR=<datos>/uv-tools uv tool install pymobiledevice3` |
+| MCP SDK + Pillow (para `xlinux mcp`) | `uv pip install --python <datos>/uv-tools/pymobiledevice3/bin/python mcp pillow` |
 | cairosvg (para `actool`) | `uv venv <datos>/py-tools && uv pip install --python <datos>/py-tools/bin/python cairosvg` |
 | LLVM del sistema | `llvm-lipo`, `llvm-otool`, `llvm-install-name-tool` (paquete `llvm-21`) y `pdftocairo` (poppler) |
 | OpenAppleMacros con `#Preview` de UIKit | ver `support/patches/README.md` (solo si algún plugin usa `#Preview` de UIKit, p. ej. Stripe) |
@@ -142,6 +145,29 @@ xlinux device agent button home
 
 Esto permite automatizar el ciclo `editar → hot reload → snapshot → inspección
 visual → interacción → snapshot` desde cualquier agente con acceso al shell.
+
+## MCP: que un agente vea y maneje el iPhone
+
+```
+claude mcp add xlinux -- xlinux mcp      # Claude Code (o el equivalente en tu agente)
+```
+
+`xlinux mcp` es un servidor MCP (stdio) que mantiene abiertos el túnel y la sesión de
+toque de CoreDevice: una captura tarda ~0,3 s (con la CLI eran ~3 s) y pesa ~25 KB.
+
+| Herramienta | Qué hace |
+|---|---|
+| `screenshot` | captura (JPEG reducido) |
+| `tap`, `swipe` | tocar / arrastrar con coordenadas 0..1; devuelven la captura de después |
+| `type_text` | escribir ASCII en el campo con foco |
+| `press_button` | home, lock, volume-up, volume-down, mute |
+| `list_apps`, `launch_app` | apps instaladas (acepta el bundle ID sin el prefijo `XTL-`) |
+| `flutter_hot_reload` | r/R del `flutter run` que corre en una terminal (SIGUSR1/SIGUSR2) |
+| `device_logs` | log del iPhone filtrado (los `print()` de Flutter) |
+
+Así un agente puede cerrar el ciclo solo: editar código → hot reload → captura →
+tocar/navegar → verificar. Úsalo con apps de desarrollo: el agente puede tocar
+cualquier cosa del teléfono.
 
 ## Detalles que costaron (para no redescubrirlos)
 
@@ -238,6 +264,8 @@ que se **usan** (se instalan aparte; no se redistribuyen aquí salvo donde se in
 | [Poppler](https://poppler.freedesktop.org/) (`pdftocairo`) | Poppler developers | GPL-2.0 / GPL-3.0 | rasterizar PDF en `actool` |
 | [libimobiledevice / usbmuxd](https://libimobiledevice.org/) | libimobiledevice project | LGPL-2.1 / GPL | conexión USB con el iPhone |
 | [uv](https://github.com/astral-sh/uv) | Astral | MIT / Apache-2.0 | instalar las herramientas de Python |
+| [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Anthropic y colaboradores | MIT | servidor MCP |
+| [Pillow](https://github.com/python-pillow/Pillow) | Jeffrey A. Clark y colaboradores | MIT-CMU | reducir las capturas del MCP |
 
 **SDK de Apple:** el SDK de iOS sale de `Xcode.xip`, que descargas tú desde
 developer.apple.com con tu Apple ID y aceptando su licencia; xlinux no lo

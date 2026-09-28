@@ -89,6 +89,16 @@ def cmd_agent_input(args):
                                        duration=getattr(args, "duration", 0.3))))
 
 
+def cmd_mcp(_args):
+    """Servidor MCP (stdio) para agentes; corre con el Python de pymobiledevice3,
+    que tiene la librería de CoreDevice y el SDK de MCP."""
+    from .core import config
+    env = config.tool_env()
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(config.REPO), env.get("PYTHONPATH", "")]))
+    python = str(config.pymobiledevice3_python())
+    os.execve(python, [python, "-m", "xlinux.mcp_server"], env)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="xlinux",
@@ -112,6 +122,8 @@ def main():
     p = sub.add_parser("run", help="compilar en release, instalar, abrir y ver logs")
     p.add_argument("--project", default=".")
     p.set_defaults(func=cmd_run)
+
+    sub.add_parser("mcp", help="servidor MCP para que un agente vea y maneje el iPhone").set_defaults(func=cmd_mcp)
 
     p = sub.add_parser("device", help="(interno) comandos que usa `flutter` para el custom device")
     dsub = p.add_subparsers(dest="device_command", required=True)
