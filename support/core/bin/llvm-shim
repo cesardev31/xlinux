@@ -1,0 +1,11 @@
+#!/bin/sh
+# lipo / otool / install_name_tool → the system LLVM's llvm-* equivalent,
+# whatever its version (/usr/bin, or the newest /usr/lib/llvm-N).
+name=$(basename "$0" | tr _ -)
+tool=$(command -v "llvm-$name") ||
+    tool=$(ls /usr/lib/llvm-*/bin/"llvm-$name" 2>/dev/null | sort -V | tail -n 1)
+if [ -z "$tool" ]; then
+    echo "$(basename "$0"): llvm-$name not found; install LLVM (see \`xlinux doctor\`)" >&2
+    exit 127
+fi
+exec "$tool" "$@"

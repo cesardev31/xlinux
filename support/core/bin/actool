@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from xlinux.core import config  # noqa: E402
+from xlinux.core import config, deps  # noqa: E402
 
 # cairosvg lives in the data directory's venv: re-exec with that Python.
 try:
@@ -106,8 +106,13 @@ def render_vector(src, dst, scale):
         return True
     if src.suffix.lower() == ".svg":
         if cairosvg is None:
-            warn(f"cannot rasterize {src.name} without cairosvg")
-            return False
+            if os.environ.get("XLINUX_ACTOOL_REEXEC"):
+                warn(f"cannot rasterize {src.name} without cairosvg")
+                return False
+            # First SVG ever: install cairosvg and start over with its Python.
+            python = deps.ensure_cairosvg()
+            os.environ["XLINUX_ACTOOL_REEXEC"] = "1"
+            os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
         cairosvg.svg2png(url=str(src), write_to=str(dst), scale=scale)
         return True
     return False

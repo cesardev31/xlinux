@@ -1,11 +1,18 @@
 """Flutter adapter."""
 
+import shutil
+
+from ...core.util import log
 from . import custom_device
 
 NAME = "Flutter"
 
 
 def setup():
+    if not shutil.which("flutter"):
+        log("Flutter not found: install it (https://docs.flutter.dev/get-started/install/linux) "
+            "and run `xlinux setup` again to register the iPhone")
+        return
     custom_device.register()
 
 

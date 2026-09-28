@@ -1,1 +1,1 @@
-/usr/lib/llvm-21/bin/llvm-lipo
+llvm-shim

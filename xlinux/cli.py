@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import __version__
 from .adapters import flutter
 from .adapters.flutter import build as flutter_build
 from .adapters.flutter import debug as flutter_debug
@@ -20,7 +21,7 @@ def detect_adapter(project_dir):
 
 
 def cmd_setup(args):
-    setup.setup(ADAPTERS, args.data_dir)
+    setup.setup(ADAPTERS, args.data_dir, xip=args.xip, everything=args.all)
 
 
 def cmd_doctor(_args):
@@ -92,7 +93,8 @@ def cmd_agent_input(args):
 def cmd_mcp(_args):
     """MCP server (stdio) for agents; runs on pymobiledevice3's Python, which
     has the CoreDevice library and the MCP SDK."""
-    from .core import config
+    from .core import config, deps
+    deps.ensure_mcp_sdk()
     env = config.tool_env()
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(config.REPO), env.get("PYTHONPATH", "")]))
     python = str(config.pymobiledevice3_python())
@@ -105,10 +107,15 @@ def main():
         description="Build, install and debug apps on a real iPhone from Linux.",
         epilog="Flutter debug with hot reload: `flutter run -d iphone-linux`, or pick the iPhone in VS Code.",
     )
+    parser.add_argument("--version", action="version", version=f"xlinux {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("setup", help="prepare the environment and register the iPhone with Flutter/VS Code")
+    p = sub.add_parser("setup", help="install everything that's missing and register the iPhone with Flutter/VS Code")
     p.add_argument("--data-dir", help="directory holding the heavy toolchains (e.g. an external SSD)")
+    p.add_argument("--xip", help="path to the Xcode .xip downloaded from Apple (searched for if omitted)")
+    p.add_argument("--all", action="store_true",
+                   help="also install what's otherwise installed on first use "
+                        "(Darling for release builds, cairosvg, MCP SDK, patched macro server)")
     p.set_defaults(func=cmd_setup)
 
     sub.add_parser("doctor", help="check that everything is ready").set_defaults(func=cmd_doctor)

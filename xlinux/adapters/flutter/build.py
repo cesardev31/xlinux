@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from ...core import app as appkit
-from ...core import config, extensions, toolchain
+from ...core import config, deps, extensions, toolchain
 from ...core.util import log, output, run
 from . import plugins
 
@@ -165,6 +165,8 @@ def build(project_dir, debug=False, package=True):
     `package`; installing on the iPhone only needs the uncompressed .app)."""
     config.require_data_dir()
     toolchain.require_sdk()
+    if not debug:
+        deps.ensure_darling()  # gen_snapshot (Dart AOT) runs in Darling
     project = Project(project_dir, debug)
     flutter_root, revision = flutter_info()
     engine = ensure_engine(revision)

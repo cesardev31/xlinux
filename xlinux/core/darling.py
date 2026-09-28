@@ -5,9 +5,7 @@ and emulates aligned `vm_map`, which Darling doesn't support). Absolute Linux
 paths are visible inside Darling under /Volumes/SystemRoot.
 """
 
-import sys
-
-from . import config
+from . import config, deps
 from .util import run
 
 ROOT = "/Volumes/SystemRoot"
@@ -24,9 +22,8 @@ def translate(arg):
 
 
 def run_macos_tool(binary, args, **kw):
+    deps.ensure_darling()
     shim = config.compat_shim()
-    if not shim.exists():
-        sys.exit("error: the Darling compatibility shim is missing. Run `xlinux setup`.")
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     return run(["darling", "shell", "env", f"DYLD_INSERT_LIBRARIES={ROOT}{shim}",

@@ -1,96 +1,80 @@
-"""Core `setup` (prepare whatever is missing) and `doctor` (diagnostics).
+"""Core `setup` (install whatever is missing) and `doctor` (diagnostics).
 
 Each adapter contributes its own steps through setup() and doctor_checks()."""
 
 import shutil
 import sys
 
-from . import config, device
-from .util import log, output, run
+from . import config, deps, device
+from .util import log, output
 
 
-def extract_xtool():
-    """xtool's AppImage needs FUSE, which isn't available when it is launched
-    from e.g. the Flutter snap: extract it once and use <data>/bin/xtool."""
-    data = config.data_dir()
-    wrapper = data / "bin/xtool"
-    if wrapper.exists():
-        return
-    appimage = shutil.which("xtool")
-    if not appimage:
-        sys.exit("error: xtool not found. Download its AppImage to ~/.local/bin/xtool.")
-    log("Extracting the xtool AppImage")
-    (data / "xtool").mkdir(parents=True, exist_ok=True)
-    run([appimage, "--appimage-extract"], cwd=data / "xtool", capture_output=True, text=True)
-    wrapper.parent.mkdir(parents=True, exist_ok=True)
-    wrapper.write_text('#!/bin/sh\n'
-                       '# xtool extracted from its AppImage: works without FUSE.\n'
-                       'exec "$(dirname "$(readlink -f "$0")")/../xtool/squashfs-root/AppRun" "$@"\n')
-    wrapper.chmod(0o755)
-
-
-def build_compat_shim():
-    shim = config.compat_shim()
-    shim.parent.mkdir(parents=True, exist_ok=True)
-    log("Building the Darling compatibility shim")
-    run(["clang", "-target", "x86_64-apple-macos11", "-isysroot", config.MACOS_SDK,
-         "-B", config.TOOLSET_BIN, "-fuse-ld=lld", "-dynamiclib", "-O2", "-Wall",
-         "-o", shim, config.SUPPORT / "core/darling_compat.c"], capture_output=True, text=True)
-
-
-def install_macro_server():
-    """xtool's OpenAppleMacros (the SDK's swift-plugin-server) lacks the UIKit
-    #Preview variants (KitViewMacro...), used e.g. by Stripe. If a patched
-    build exists in <data>/bin it is installed over xtool's (see
-    support/patches/README.md)."""
-    patched = config.data_dir() / "bin/OpenAppleMacrosServer"
-    target = config.XTOOL_SDK / "OpenAppleMacrosServer"
-    if not patched.exists() or not target.exists():
-        return
-    if target.read_bytes() == patched.read_bytes():
-        return
-    backup = target.with_name("OpenAppleMacrosServer.orig")
-    if not backup.exists():
-        shutil.copy2(target, backup)
-    log("Installing OpenAppleMacrosServer with UIKit #Preview stubs")
-    shutil.copy2(patched, target)
-
-
-def setup(adapters, data_dir=None):
+def _prepare_data_dir(data_dir):
     values = config.load_config()
     if data_dir:
         values["data_dir"] = str(data_dir)
         config.save_config(values)
-    config.require_data_dir()
-    if not config.MACOS_SDK.exists():
-        sys.exit("error: Apple SDK missing. Run `xtool setup` with your Xcode.xip first.")
-    extract_xtool()
-    build_compat_shim()
-    install_macro_server()
+    data = config.data_dir()
+    # A configured directory whose parent is gone is most likely an unmounted
+    # drive: don't create it on the system disk by accident.
+    if not data.exists() and not data_dir and data != config.DEFAULT_DATA_DIR and not data.parent.exists():
+        sys.exit(f"error: data directory {data} not found (is the drive mounted? "
+                 "or choose another one with `xlinux setup --data-dir`)")
+    for sub in ("bin", "downloads", "tmp"):
+        (data / sub).mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(data).free >> 30
+    log(f"Data directory: {data} ({free} GB free)")
+    if free < 30:
+        print("    warning: SDK, toolchains and dependencies take ~20-40 GB; "
+              "consider `--data-dir` on a bigger drive", file=sys.stderr)
+
+
+def setup(adapters, data_dir=None, xip=None, everything=False):
+    _prepare_data_dir(data_dir)
+    # Downloads first, as the user; then everything that needs sudo at once.
+    deps.ensure_uv()
+    swift_post_install = deps.ensure_swift()
+    deps.ensure_xtool()
+    deps.ensure_pymobiledevice3()
+    deps.install_system_packages(deps.system_packages(), swift_post_install)
+    deps.ensure_apple_sdk(xip)
+    deps.install_macro_server()
+    if everything:
+        deps.ensure_darling()
+        deps.ensure_cairosvg()
+        deps.ensure_mcp_sdk()
+        deps.ensure_macro_server()
     for adapter in adapters:
         adapter.setup()
     doctor(adapters)
 
 
-def _check(ok, label, hint=""):
-    print(f"  {'✅' if ok else '❌'} {label}" + (f"\n       → {hint}" if not ok and hint else ""))
-    return ok
+def _check(ok, label, hint="", optional=False):
+    mark = "✅" if ok else "⚪" if optional else "❌"
+    print(f"  {mark} {label}" + (f"\n       → {hint}" if not ok and hint else ""))
+    return ok or optional
 
 
 def doctor(adapters):
     data = config.data_dir()
     env = config.tool_env()
     which = lambda name: shutil.which(name, path=env["PATH"])  # noqa: E731
+    later = "installed automatically the first time it's needed"
     print("doctor\n")
     print("Core:")
-    ok = _check((data / "swiftly").is_dir(), f"data directory ({data})", "is the drive mounted?")
-    ok &= _check(config.swift_bin() is not None, "Swift toolchain", "install it with swiftly into the data directory")
-    ok &= _check(bool(which("xtool")), "xtool", "download its AppImage to ~/.local/bin/xtool")
-    ok &= _check(config.IPHONE_SDK.exists(), "iOS SDK (xtool)", "run `xtool setup` with Xcode.xip")
-    ok &= _check(bool(which("darling")), "Darling", "install the darling-core/system/cli .deb packages")
-    ok &= _check(config.compat_shim().exists(), "Darling shim", "run `xlinux setup`")
-    ok &= _check(config.pymobiledevice3_python().exists(), "pymobiledevice3",
-                 "UV_TOOL_DIR=<data>/uv-tools uv tool install pymobiledevice3")
+    ok = _check((data / "swiftly").is_dir(), f"data directory ({data})",
+                "run `xlinux setup` (is the drive mounted?)")
+    ok &= _check(config.swift_bin() is not None, "Swift toolchain", "run `xlinux setup`")
+    ok &= _check(bool(which("xtool")), "xtool", "run `xlinux setup`")
+    ok &= _check(config.IPHONE_SDK.exists(), "iOS SDK (from Xcode.xip)", "run `xlinux setup`")
+    ok &= _check(config.pymobiledevice3_python().exists(), "pymobiledevice3", "run `xlinux setup`")
+    ok &= _check(deps.llvm_tools_found(), "LLVM (lipo, otool, install_name_tool)",
+                 "install your distribution's `llvm` package")
+    _check(bool(which("darling")) and config.compat_shim().exists(), "Darling (release builds)",
+           later, optional=True)
+    _check((data / "py-tools/bin/python").exists(), "cairosvg (SVG assets)", later, optional=True)
+    _check((data / "bin/OpenAppleMacrosServer").exists(), "OpenAppleMacros with UIKit #Preview",
+           later + " (plugins such as Stripe)", optional=True)
 
     for adapter in adapters:
         print(f"\n{adapter.NAME}:")

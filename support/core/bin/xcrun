@@ -27,7 +27,6 @@ SDKS = {
 
 def find(name):
     swift = config.swift_bin()
-    llvm = Path("/usr/lib/llvm-21/bin")
     tools = {
         # clang with xtool's linker (see xlinux/core/toolchain.py)
         "clang": HERE / "apple-clang", "clang++": HERE / "apple-clang++", "cc": HERE / "apple-clang",
@@ -38,10 +37,10 @@ def find(name):
         "nm": swift / "llvm-nm" if swift else None,
         "swift": swift / "swift" if swift else None,
         "swiftc": swift / "swiftc" if swift else None,
-        "lipo": llvm / "llvm-lipo",
-        "install_name_tool": llvm / "llvm-install-name-tool",
-        "otool": llvm / "llvm-otool",
-        "strip": llvm / "llvm-strip",
+        "lipo": config.llvm_tool("lipo"),
+        "install_name_tool": config.llvm_tool("install-name-tool"),
+        "otool": config.llvm_tool("otool"),
+        "strip": config.llvm_tool("strip"),
         # xtool signs the whole .app at the end (frameworks included).
         "codesign": HERE / "noop",
     }

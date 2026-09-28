@@ -5,7 +5,7 @@ import re
 import shutil
 import sys
 
-from . import config
+from . import config, deps
 from .util import log, output, run
 
 
@@ -16,7 +16,7 @@ def target():
 def require_sdk():
     for path in (config.IPHONE_SDK, config.TOOLSET_BIN):
         if not path.exists():
-            sys.exit(f"error: {path} is missing. Run `xtool setup` (see `xlinux doctor`).")
+            sys.exit(f"error: {path} is missing. Run `xlinux setup`.")
 
 
 # The Swift toolchain's lld is older than the iOS 27 SDK: use xtool's
@@ -105,6 +105,12 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
             run(["swift", "package", "--package-path", package, "--config-path", config_path,
                  "config", "set-mirror", "--original", url, "--mirror", str(mirror)],
                 capture_output=True, text=True)
+    if not (config.data_dir() / "bin/OpenAppleMacrosServer").exists():
+        # Dependencies are fetched first to know whether they need the patched macro server.
+        run(["swift", "package", "resolve", "--package-path", package, "--scratch-path", scratch,
+             "--config-path", config_path, "--cache-path", config.data_dir() / "swiftpm-cache"], cwd=package)
+        if deps.needs_uikit_preview([package, scratch / "checkouts"]):
+            deps.ensure_macro_server()
     # Swift 6.4 uses Swift Build by default; configure it the way xtool does
     # (PackLib/BuildSettings.swift): triple + toolset-swb.json + SDK platforms.
     # actool (support/core/bin/actool): Swift Build looks it up in PATH to

@@ -9,6 +9,8 @@ a framework's own tool (e.g. Flutter custom devices), which don't source any
 
 import json
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -50,7 +52,7 @@ def data_dir():
 def require_data_dir():
     data = data_dir()
     if not (data / "swiftly").is_dir():
-        sys.exit(f"error: data directory not found at {data} (is the drive mounted? see `xlinux setup --data-dir`)")
+        sys.exit(f"error: data directory not found at {data} (run `xlinux setup`; if it's on an external drive, is it mounted?)")
     return data
 
 
@@ -61,6 +63,17 @@ def swift_bin():
 
 def pymobiledevice3_python():
     return data_dir() / "uv-tools/pymobiledevice3/bin/python"
+
+
+def llvm_tool(name):
+    """The system LLVM's `llvm-<name>` (lipo, otool, install-name-tool...),
+    whatever its version: /usr/bin, or the newest /usr/lib/llvm-N (Debian/Ubuntu)."""
+    found = shutil.which(f"llvm-{name}")
+    if found:
+        return found
+    versions = sorted(Path("/usr/lib").glob(f"llvm-*/bin/llvm-{name}"),
+                      key=lambda p: int(re.sub(r"\D", "", p.parent.parent.name) or 0))
+    return str(versions[-1]) if versions else None
 
 
 def compat_shim():
@@ -77,7 +90,8 @@ def tool_env():
     path = [str(SUPPORT / "core/bin"), str(data / "bin"), str(Path.home() / ".local/bin")]
     if swift_bin():
         path.insert(0, str(swift_bin()))
-    env["PATH"] = os.pathsep.join(path + [env.get("PATH", "")])
+    # pymobiledevice3's venv goes last: its `python3` mustn't shadow the system one.
+    env["PATH"] = os.pathsep.join(path + [env.get("PATH", ""), str(pymobiledevice3_python().parent)])
     env["DPREFIX"] = str(data / "darling-prefix")
     env["XTL_TMPDIR"] = str(data / "tmp")
     env["UV_TOOL_DIR"] = str(data / "uv-tools")
