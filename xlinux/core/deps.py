@@ -13,8 +13,11 @@ import os
 import platform
 import shutil
 import sys
+import subprocess
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -22,8 +25,10 @@ from pathlib import Path
 from . import config
 from .util import log, output, run
 
-SWIFT_VERSION = "6.4"
+SWIFT_VERSION = "6.4.0"
 SWIFTLY_URL = "https://download.swift.org/swiftly/linux/swiftly-{arch}.tar.gz"
+SWIFT_KEYS_URL = "https://www.swift.org/keys/all-keys.asc"
+SWIFT_RELEASES_URL = "https://www.swift.org/api/v1/install/releases.json"
 XCODE_DOWNLOAD_URL = "https://developer.apple.com/download/all/?q=Xcode"
 # Base commit of support/patches/OpenAppleMacros-preview-uikit.patch.
 OPEN_APPLE_MACROS = ("https://github.com/xtool-org/OpenAppleMacros", "e932208f5610a5024d3a043e202f0f67b926e1cf")
@@ -44,24 +49,56 @@ def _which(name):
     return shutil.which(name, path=config.tool_env()["PATH"])
 
 
+DOWNLOAD_ATTEMPTS = 8
+DOWNLOAD_TIMEOUT = 60  # seconds without data: e.g. after the laptop was suspended
+
+
+def _download_chunk(url, partial):
+    """Append what's missing of `url` to `partial` (HTTP Range). Returns True when complete."""
+    have = partial.stat().st_size if partial.exists() else 0
+    request = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
+    try:
+        response = urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT)
+    except urllib.error.HTTPError as error:
+        if error.code == 416:  # nothing left to download
+            return True
+        raise
+    with response:
+        if have and response.status != 206:  # the server ignored Range: start over
+            have = 0
+        total = have + int(response.headers.get("Content-Length") or 0)
+        with open(partial, "ab" if have else "wb") as out:
+            done = have
+            while chunk := response.read(1 << 20):
+                out.write(chunk)
+                done += len(chunk)
+                if total and sys.stderr.isatty():
+                    print(f"\r    {done >> 20} / {total >> 20} MB", end="", file=sys.stderr, flush=True)
+    if sys.stderr.isatty():
+        print(file=sys.stderr)
+    return not total or done >= total
+
+
 def download(url, dest):
-    """Download `url` to `dest` (kept: an interrupted setup doesn't download it again)."""
+    """Download `url` to `dest`, resuming after network drops (retried here) or
+    an interrupted setup (the `.part` file is kept and continued next time)."""
     dest = Path(dest)
     if dest.exists():
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".part")
-    log(f"Downloading {url.rsplit('/', 1)[-1]}")
-    with urllib.request.urlopen(url) as response, open(partial, "wb") as out:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        while chunk := response.read(1 << 20):
-            out.write(chunk)
-            done += len(chunk)
-            if total and sys.stderr.isatty():
-                print(f"\r    {done >> 20} / {total >> 20} MB", end="", file=sys.stderr, flush=True)
-    if total and sys.stderr.isatty():
-        print(file=sys.stderr)
+    log(f"Downloading {url.rsplit('/', 1)[-1]}" + (" (resuming)" if partial.exists() else ""))
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            if _download_chunk(url, partial):
+                break
+        except (OSError, urllib.error.URLError) as error:  # timeouts and resets included
+            if attempt == DOWNLOAD_ATTEMPTS:
+                sys.exit(f"error: downloading {url} failed ({error}).\n"
+                         "Check the connection and run the same command again: it resumes where it stopped.")
+            wait = min(5 * attempt, 30)
+            print(f"\n    connection lost ({error}); retrying in {wait} s", file=sys.stderr, flush=True)
+            time.sleep(wait)
     partial.rename(dest)
     return dest
 
@@ -115,27 +152,96 @@ def _swiftly_env():
     return env
 
 
+def _swift_platform():
+    """swiftly's name for this distribution, e.g. ("ubuntu2604", "ubuntu26.04")."""
+    platform_info = json.loads((config.data_dir() / "swiftly/config.json").read_text())["platform"]
+    return platform_info["name"], platform_info["nameFull"]
+
+
+def _verify_swift(archive, url):
+    """Check the toolchain's PGP signature with swift.org's keys (as swiftly does)."""
+    if not shutil.which("gpg"):
+        log("warning: gpg not found, the Swift toolchain's signature isn't verified")
+        return
+    signature = download(url + ".sig", archive.with_name(archive.name + ".sig"))
+    keys = download(SWIFT_KEYS_URL, archive.with_name("swift-all-keys.asc"))
+    with tempfile.TemporaryDirectory(dir=config.data_dir() / "tmp") as home:
+        env = dict(os.environ, GNUPGHOME=home)
+        run(["gpg", "--batch", "--quiet", "--import", keys], env=env, capture_output=True)
+        result = run(["gpg", "--batch", "--verify", signature, archive], env=env, check=False,
+                     capture_output=True, text=True)
+    if result.returncode != 0:
+        archive.unlink()
+        signature.unlink()
+        sys.exit(f"error: the Swift toolchain's signature doesn't verify; the download was "
+                 f"removed, run `xlinux setup` again.\n{result.stderr.strip()}")
+
+
 def ensure_swift():
-    """Swift through swiftly, entirely inside the data directory. Returns the
-    commands swiftly asks to run as root afterwards (its system packages)."""
+    """Swift inside the data directory, laid out and registered like swiftly
+    does (swiftly detects the distribution). The toolchain itself (~1 GB) is
+    downloaded here rather than by `swiftly install`, which starts over when
+    the connection drops (e.g. the laptop is suspended) instead of resuming."""
     if config.swift_bin():
-        return ""
+        return
     data = config.data_dir()
     env = _swiftly_env()
     (data / "tmp").mkdir(parents=True, exist_ok=True)
-    swiftly = data / "swiftly/bin/swiftly"
-    if not swiftly.exists():
+    if not (data / "swiftly/config.json").exists():
         archive = download(SWIFTLY_URL.format(arch=arch()), data / "downloads" / f"swiftly-{arch()}.tar.gz")
         with tempfile.TemporaryDirectory(dir=data / "tmp") as tmp:
             run(["tar", "-xzf", archive, "-C", tmp])
             run([Path(tmp) / "swiftly", "init", "--no-modify-profile", "--skip-install",
                  "--quiet-shell-followup", "--assume-yes"], env=env)
-    log(f"Installing Swift {SWIFT_VERSION} (about 1 GB)")
-    post_install = data / "tmp/swiftly-post-install.sh"
-    post_install.unlink(missing_ok=True)
-    run([swiftly, "install", SWIFT_VERSION, "--use", "--assume-yes",
-         "--post-install-file", post_install], env=env)
-    return post_install.read_text() if post_install.exists() else ""
+
+    # The release's tag (e.g. swift-6.4.0-RELEASE), as swiftly looks it up.
+    with urllib.request.urlopen(SWIFT_RELEASES_URL, timeout=DOWNLOAD_TIMEOUT) as response:
+        tag = next((r["tag"] for r in json.load(response) if r["name"] == SWIFT_VERSION),
+                   f"swift-{SWIFT_VERSION}-RELEASE")
+    name, name_full = _swift_platform()
+    suffix = "-aarch64" if arch() == "aarch64" else ""
+    url = (f"https://download.swift.org/{tag.lower()}/{name}{suffix}/{tag}/"
+           f"{tag}-{name_full}{suffix}.tar.gz")
+    log(f"Installing Swift {SWIFT_VERSION} for {name_full} (about 1 GB)")
+    archive = download(url, data / "downloads" / url.rsplit("/", 1)[-1])
+    _verify_swift(archive, url)
+
+    # Extracted aside and moved in whole: an interrupted extraction must not
+    # look like an installed toolchain.
+    toolchains = data / "swiftly/toolchains"
+    staging = data / "tmp/swift-toolchain"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    run(["tar", "-xzf", archive, "-C", staging, "--strip-components=1"])
+    toolchains.mkdir(parents=True, exist_ok=True)
+    staging.rename(toolchains / SWIFT_VERSION)
+
+    swiftly_config = data / "swiftly/config.json"
+    values = json.loads(swiftly_config.read_text())
+    values["installedToolchains"] = sorted({*values.get("installedToolchains", []), SWIFT_VERSION})
+    values["inUse"] = SWIFT_VERSION
+    swiftly_config.write_text(json.dumps(values, indent=2) + "\n")
+    archive.unlink()  # 1 GB; the toolchain is what's kept
+
+
+# What Swift needs from the system on Debian/Ubuntu (swift.org's list; g++
+# brings the libstdc++/libgcc headers of the distribution's default GCC).
+SWIFT_APT_PACKAGES = ("binutils", "git", "gnupg2", "libc6-dev", "libcurl4-openssl-dev", "libedit2",
+                      "libncurses-dev", "libpython3-dev", "libsqlite3-0", "libxml2-dev", "libz3-dev",
+                      "pkg-config", "tzdata", "unzip", "zlib1g-dev", "g++")
+
+
+def _apt_missing(packages):
+    """The packages that aren't installed (and exist in the configured repositories)."""
+    missing = []
+    for package in packages:
+        status = subprocess.run(["dpkg-query", "-W", "-f=${Status}", package],
+                                capture_output=True, text=True).stdout
+        if "install ok installed" in status:
+            continue
+        if subprocess.run(["apt-cache", "show", package], capture_output=True).returncode == 0:
+            missing.append(package)
+    return missing
 
 
 def llvm_tools_found():
@@ -143,25 +249,25 @@ def llvm_tools_found():
 
 
 def system_packages():
-    """Debian/Ubuntu packages still missing: system LLVM (lipo, otool,
-    install_name_tool), pdftocairo (PDF assets), unzip and git."""
-    missing = []
+    """Debian/Ubuntu packages still missing: what Swift needs, system LLVM
+    (lipo, otool, install_name_tool) and pdftocairo (PDF assets)."""
+    wanted = list(SWIFT_APT_PACKAGES) + ["poppler-utils"]
     if not llvm_tools_found():
-        missing.append("llvm")
-    for command, package in (("pdftocairo", "poppler-utils"), ("unzip", "unzip"), ("git", "git")):
-        if not shutil.which(command):
-            missing.append(package)
-    return missing
+        wanted.append("llvm")
+    if has_apt():
+        return _apt_missing(wanted)
+    return [p for p in ("llvm", "poppler-utils", "git", "unzip") if p in wanted and
+            not shutil.which({"llvm": "llvm-lipo", "poppler-utils": "pdftocairo"}.get(p, p))]
 
 
-def install_system_packages(packages, swift_post_install=""):
-    if not packages and not swift_post_install.strip():
+def install_system_packages(packages):
+    if not packages:
         return
     if not has_apt():
-        sys.exit("error: install these with your package manager and run `xlinux setup` again:\n"
-                 f"  {' '.join(packages) or '(none)'}\n" + swift_post_install)
-    script = f"apt-get install -y {' '.join(packages)}\n" if packages else ""
-    sudo(script + swift_post_install, "Installing system packages")
+        sys.exit("error: install these with your package manager, plus Swift's dependencies\n"
+                 "(https://www.swift.org/install/linux/), and run `xlinux setup` again:\n"
+                 f"  {' '.join(packages)}")
+    sudo(f"apt-get install -y {' '.join(packages)}", "Installing system packages")
 
 
 def ensure_xtool():

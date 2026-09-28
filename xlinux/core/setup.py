@@ -36,10 +36,10 @@ def setup(adapters, data_dir=None, xip=None, everything=False):
     _prepare_data_dir(data_dir)
     # Downloads first, as the user; then everything that needs sudo at once.
     deps.ensure_uv()
-    swift_post_install = deps.ensure_swift()
+    deps.ensure_swift()
     deps.ensure_xtool()
     deps.ensure_pymobiledevice3()
-    deps.install_system_packages(deps.system_packages(), swift_post_install)
+    deps.install_system_packages(deps.system_packages())
     deps.ensure_apple_sdk(xip)
     deps.install_macro_server()
     if everything:

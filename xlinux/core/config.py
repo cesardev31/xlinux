@@ -57,7 +57,8 @@ def require_data_dir():
 
 
 def swift_bin():
-    toolchains = sorted((data_dir() / "swiftly/toolchains").glob("*/usr/bin"))
+    toolchains = sorted(p for p in (data_dir() / "swiftly/toolchains").glob("*/usr/bin")
+                        if not p.parent.parent.name.startswith("."))
     return toolchains[-1] if toolchains else None
 
 
