@@ -344,7 +344,10 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   hardcoding it.
 - Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
-- Expo: the launch storyboard (splash) becomes a plain `UILaunchScreen`;
+- Expo: the launch storyboard becomes an equivalent `UILaunchScreen` (the
+  centered logo on the system background); expo-splash-screen's own overlay,
+  which keeps the splash until `hideAsync()`, needs the compiled storyboard
+  and is skipped;
   debug and release share `ios/Pods`, so switching configuration swaps the
   prebuilt frameworks each time; `pod install` writes `ios/Pods` (~1 GB)
   inside the project, as on a Mac.
@@ -354,8 +357,8 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
 1. Dart changes without reinstalling (push the kernel into the app's container
    and launch with `--flutter-assets-dir`).
 2. Objective-C/C pods in the CocoaPods conversion.
-3. Expo / React Native: the splash screen without ibtool, upstreaming the
-   `expo-modules-jsi` patch.
+3. Expo / React Native: expo-splash-screen's overlay without ibtool (writing
+   the compiled storyboard), upstreaming the `expo-modules-jsi` patch.
 
 ## Credits and licenses
 

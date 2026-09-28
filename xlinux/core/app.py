@@ -9,6 +9,7 @@ import plistlib
 import re
 import shutil
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -90,6 +91,18 @@ def expand(value, variables):
     return value
 
 
+def launch_screen(storyboard):
+    """UILaunchScreen equivalent of a simple launch storyboard (a centered
+    image on the system background, e.g. Expo's and Flutter's), since
+    storyboards can't be compiled without ibtool."""
+    try:
+        root = ET.parse(storyboard).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    image = next((v.get("image") for v in root.iter("imageView") if v.get("image")), None)
+    return {"UIImageName": image} if image else {}
+
+
 def info_plist(source, variables, scene_delegate=None):
     """Info.plist ready for a .app built without ibtool.
 
@@ -98,7 +111,12 @@ def info_plist(source, variables, scene_delegate=None):
     with open(source, "rb") as f:
         info = expand(plistlib.load(f), variables)
     info.pop("UIMainStoryboardFile", None)
-    info.pop("UILaunchStoryboardName", None)
+    storyboard = info.pop("UILaunchStoryboardName", None)
+    if storyboard and "UILaunchScreen" not in info:
+        folder = Path(source).parent
+        candidates = [folder / f"{storyboard}.storyboard", folder / f"Base.lproj/{storyboard}.storyboard"]
+        found = next((c for c in candidates if c.exists()), None)
+        info["UILaunchScreen"] = launch_screen(found) if found else {}
     info.setdefault("UILaunchScreen", {})
     for configs in info.get("UIApplicationSceneManifest", {}).get("UISceneConfigurations", {}).values():
         for scene in configs:
