@@ -92,18 +92,39 @@ def _xtool_install(ipa, udid):
     return "Successfully installed" in out, out
 
 
+def _container(path):
+    """/var/containers/Bundle/Application/<UUID> of an app or process path."""
+    parts = path.removeprefix("/private").split("/")
+    return "/".join(parts[:6]) if parts[1:5] == ["var", "containers", "Bundle", "Application"] else None
+
+
 def running_pids(bundle_id):
-    """PIDs of the app on the iPhone (DVT proclist, matched by the .app directory)."""
+    """PIDs of the app on the iPhone (DVT proclist, matched by the .app
+    directory), plus orphans: instances of an app with the same .app name
+    whose install was replaced since they started. A debug one left behind
+    keeps a debugserver attached and makes the next lldb attach fail ("a
+    process is already being debugged")."""
     try:
-        _, remote_app = installed_app(bundle_id)
-    except SystemExit:
-        return []
-    container = remote_app.removeprefix("/private").rsplit("/", 1)[0]
-    try:
+        apps = json.loads(pmd3("apps", "list", "-t", "Any"))
         procs = json.loads(pmd3("developer", "dvt", "proclist", check=False) or "[]")
     except ValueError:
         return []
-    return [p["pid"] for p in procs if str(p.get("realAppName", "")).startswith(container)]
+    mine = [info["Path"] for real_id, info in apps.items()
+            if real_id == bundle_id or real_id.endswith("." + bundle_id)]
+    if not mine:
+        return []
+    container, app_dir = _container(mine[0]), mine[0].rstrip("/").rsplit("/", 1)[1]
+    installed = {_container(info["Path"]) for info in apps.values() if info.get("Path")}
+    pids = []
+    for p in procs:
+        path = str(p.get("realAppName", ""))
+        c = _container(path)
+        if not c:
+            continue
+        orphan = c not in installed and path.removeprefix("/private").startswith(f"{c}/{app_dir}/")
+        if c == container or orphan:
+            pids.append(p["pid"])
+    return pids
 
 
 def terminate(bundle_id):
