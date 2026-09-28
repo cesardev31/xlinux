@@ -11,6 +11,8 @@ Darling, pymobiledevice3, Swift/LLVM and Flutter's own tooling; see README.md.
 ## Using xlinux in an app project
 
 ```
+curl -fsSL https://github.com/cesardev31/xlinux/releases/latest/download/install.sh | sh
+xlinux setup                          # installs everything missing (Xcode .xip: manual download)
 xlinux doctor                         # check the environment and the iPhone
 flutter run -d iphone-linux           # debug + hot reload (custom device)
 xlinux build [--debug] [--install] [--project DIR]
@@ -36,6 +38,8 @@ xlinux mcp                            # MCP server (stdio) to see and drive the 
 - No test suite yet. Verify changes with `xlinux doctor`, a build of a sample
   app (`xlinux build --debug --project <app>`) and, for debugging changes,
   `tools/bench_debug.py`.
+- External tools are installed by `xlinux/core/deps.py`: `ensure_*` helpers,
+  idempotent; rarely used ones are called lazily where they're needed.
 - Heavy data (SDK, toolchains, caches) lives in the data directory
   (`~/.local/share/xlinux` by default, configurable via `xlinux setup --data-dir`).
 - Everything user-facing (output, help, docs, comments) is in English.

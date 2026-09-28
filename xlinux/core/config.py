@@ -95,6 +95,7 @@ def tool_env():
     env["DPREFIX"] = str(data / "darling-prefix")
     env["XTL_TMPDIR"] = str(data / "tmp")
     env["UV_TOOL_DIR"] = str(data / "uv-tools")
+    env["UV_TOOL_BIN_DIR"] = str(data / "bin")  # not ~/.local/bin: no clash with other installs
     env["UV_CACHE_DIR"] = str(data / "tmp/uv-cache")
     env.setdefault("NO_COLOR", "1")
     return env

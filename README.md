@@ -91,29 +91,44 @@ the core.
 
 ## Installation
 
-The heavy parts (≈40 GB including SwiftPM dependencies) live in a **data
-directory** (default `~/.local/share/xlinux`; an external SSD works well):
+```
+curl -fsSL https://github.com/cesardev31/xlinux/releases/latest/download/install.sh | sh
+xlinux setup      # add --data-dir /path to keep everything on another drive
+xlinux doctor
+```
 
-| What | How |
+The installer puts the CLI (plain Python 3.10+, no dependencies) in
+`~/.local/lib/xlinux` and the `xlinux` command in `~/.local/bin`; running it
+again updates it. `xlinux setup` then installs the rest into the **data
+directory** (default `~/.local/share/xlinux`; ≈20-40 GB with SwiftPM
+dependencies, about what Xcode takes on a Mac; an external SSD works well). It
+can be interrupted and run again: it picks up where it left off.
+
+| What | How `setup` gets it |
 |---|---|
-| Swift 6.4 | [swiftly](https://github.com/swiftlang/swiftly) with `SWIFTLY_HOME_DIR` inside the data directory |
-| xtool | AppImage at `~/.local/bin/xtool`; `xtool setup` with `Xcode_27.xip` (downloaded by you with your Apple ID) |
-| Darling | the `darling-core`, `darling-system`, `darling-cli` `.deb` packages |
-| pymobiledevice3 | `UV_TOOL_DIR=<data>/uv-tools uv tool install pymobiledevice3` |
-| MCP SDK + Pillow (for `xlinux mcp`) | `uv pip install --python <data>/uv-tools/pymobiledevice3/bin/python mcp pillow` |
-| cairosvg (for `actool`) | `uv venv <data>/py-tools && uv pip install --python <data>/py-tools/bin/python cairosvg` |
-| System LLVM | `llvm-lipo`, `llvm-otool`, `llvm-install-name-tool` (the `llvm-21` package) and `pdftocairo` (poppler) |
-| OpenAppleMacros with UIKit `#Preview` | see `support/patches/README.md` (only needed if a plugin uses UIKit `#Preview`, e.g. Stripe) |
-| Flutter's iOS engine | downloaded automatically on the first build |
+| uv | its GitHub release, into `<data>/bin` (unless already installed) |
+| Swift 6.4 | [swiftly](https://github.com/swiftlang/swiftly), everything inside the data directory |
+| xtool | its AppImage from GitHub, extracted (works without FUSE, e.g. from the Flutter snap) |
+| pymobiledevice3 | `uv tool install`, into the data directory |
+| System packages: LLVM (`lipo`/`otool`/`install_name_tool`), poppler, unzip, git and the ones Swift needs | `apt-get`, with **one** sudo prompt; other distributions get the list to install |
+| iOS/macOS SDK | **the one manual step**: Apple doesn't allow redistributing it, so you download `Xcode_27.xip` with your Apple ID ([developer.apple.com/download](https://developer.apple.com/download/all/?q=Xcode)). `setup` finds it in your Downloads folder (or `--xip PATH`), signs you in to Apple and extracts it |
+| Flutter's custom device | registered in `~/.config/flutter/custom_devices.json` (Flutter itself is yours to install) |
 
-```
-bin/xlinux setup --data-dir /path/to/data-directory
-bin/xlinux doctor
-```
+Installed automatically the first time they're needed (or all at once with
+`xlinux setup --all`):
 
-`setup` extracts xtool's AppImage (so it works without FUSE from the Flutter
-snap), builds the Darling shim, installs the patched macro server if present
-and registers the iPhone in `~/.config/flutter/custom_devices.json`.
+| What | When |
+|---|---|
+| Darling (`.deb` packages from its GitHub release; x86_64 Debian/Ubuntu) + the compatibility shim | first release build (debug doesn't need it) |
+| cairosvg | first SVG in an asset catalog |
+| OpenAppleMacros with UIKit `#Preview` (`support/patches/`) | first plugin that uses it (e.g. Stripe) |
+| MCP SDK + Pillow | first `xlinux mcp` |
+| Flutter's iOS engine | first build |
+
+From a git checkout, `bin/xlinux` works the same way. To publish a release
+(no CI needed): bump `__version__` in `xlinux/__init__.py`, commit and run
+`tools/release.sh` (it tags, packages `xlinux.tar.gz` and uploads it with
+`install.sh` through `gh`).
 
 Recommended for debugging (much faster), in another terminal:
 

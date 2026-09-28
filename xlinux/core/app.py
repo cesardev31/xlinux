@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 from . import config
-from .util import log
+from .util import log, run
 
 
 def bundle_identifier(xcodeproj, exclude=("Tests",)):
@@ -23,6 +23,50 @@ def bundle_identifier(xcodeproj, exclude=("Tests",)):
     if not ids:
         sys.exit(f"error: PRODUCT_BUNDLE_IDENTIFIER not found in {xcodeproj.name}")
     return ids[0]
+
+
+def build_settings(ios_dir):
+    """buildSettings of every XCBuildConfiguration in Runner.xcodeproj, as
+    dicts of raw strings (enough to find each target's Info.plist, bundle ID
+    and entitlements without a full pbxproj parser)."""
+    pbxproj = ios_dir / "Runner.xcodeproj/project.pbxproj"
+    if not pbxproj.exists():
+        return
+    for block in pbxproj.read_text().split("isa = XCBuildConfiguration;")[1:]:
+        settings = block.split("name = ", 1)[0]
+        yield {k: v.strip().strip('"') for k, v in re.findall(r"\b([A-Z_]+) = ([^;]+);", settings)}
+
+
+def entitlements_file(ios_dir, info_plist):
+    """CODE_SIGN_ENTITLEMENTS of the target whose Info.plist is `info_plist`
+    (relative to ios_dir, e.g. "Runner/Info.plist")."""
+    for settings in build_settings(ios_dir):
+        if settings.get("INFOPLIST_FILE") == info_plist and settings.get("CODE_SIGN_ENTITLEMENTS"):
+            path = ios_dir / settings["CODE_SIGN_ENTITLEMENTS"]
+            return path if path.exists() else None
+    return None
+
+
+def embed_entitlements(executable, entitlements, identifier, variables):
+    """Ad-hoc sign `executable` with the target's entitlements.
+
+    xtool takes the entitlements to register (App Groups…) and re-sign with
+    from the executable's existing signature, like Xcode's codesign step
+    leaves them. rcodesign (apple-codesign) writes that signature on Linux."""
+    if entitlements is None:
+        return
+    from . import deps
+    rcodesign = deps.ensure_rcodesign()
+    with open(entitlements, "rb") as f:
+        values = expand(plistlib.load(f), variables)
+    resolved = executable.with_name(f".{executable.name}.entitlements")
+    with open(resolved, "wb") as f:
+        plistlib.dump(values, f)
+    try:
+        run([rcodesign, "sign", "--entitlements-xml-file", resolved, "--binary-identifier", identifier,
+             executable], capture_output=True, text=True)
+    finally:
+        resolved.unlink()
 
 
 def read_xcconfig(path):

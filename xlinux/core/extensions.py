@@ -19,8 +19,9 @@ from .util import log
 
 
 class Extension:
-    def __init__(self, name, directory, info_plist, bundle_id):
+    def __init__(self, name, directory, info_plist, bundle_id, entitlements=None):
         self.name = name
+        self.entitlements = entitlements
         self.dir = directory
         self.info_plist = info_plist
         self.bundle_id = bundle_id
@@ -29,20 +30,10 @@ class Extension:
         return sorted(p for p in self.dir.rglob("*.swift"))
 
 
-def _build_settings(pbxproj_text):
-    """buildSettings of every XCBuildConfiguration, as dicts of raw strings."""
-    for block in pbxproj_text.split("isa = XCBuildConfiguration;")[1:]:
-        settings = block.split("name = ", 1)[0]
-        yield {k: v.strip().strip('"') for k, v in re.findall(r"\b([A-Z_]+) = ([^;]+);", settings)}
-
-
 def discover(ios_dir, app_bundle_id):
     """Extension targets of the Xcode project in `ios_dir`."""
-    pbxproj = ios_dir / "Runner.xcodeproj/project.pbxproj"
-    if not pbxproj.exists():
-        return []
     found = {}
-    for settings in _build_settings(pbxproj.read_text()):
+    for settings in appkit.build_settings(ios_dir):
         plist_path = settings.get("INFOPLIST_FILE", "")
         if not plist_path or plist_path in found:
             continue
@@ -54,7 +45,10 @@ def discover(ios_dir, app_bundle_id):
                 continue
         name = settings.get("PRODUCT_NAME", "").replace("$(TARGET_NAME)", "") or plist.parent.name
         bundle_id = settings.get("PRODUCT_BUNDLE_IDENTIFIER") or f"{app_bundle_id}.{name}"
-        found[plist_path] = Extension(name, plist.parent, plist, bundle_id)
+        entitlements = settings.get("CODE_SIGN_ENTITLEMENTS")
+        entitlements = ios_dir / entitlements if entitlements else None
+        found[plist_path] = Extension(name, plist.parent, plist, bundle_id,
+                                      entitlements if entitlements and entitlements.exists() else None)
     return list(found.values())
 
 
@@ -134,6 +128,8 @@ def build_all(ios_dir, app, build_dir, debug):
             _compile(ext, cached, debug)
             with open(cached / "Info.plist", "wb") as f:
                 plistlib.dump(info, f)
+            appkit.embed_entitlements(cached / ext.name, ext.entitlements, ext.bundle_id,
+                                      {"PRODUCT_BUNDLE_IDENTIFIER": ext.bundle_id})
             stamp.write_text(fingerprint)
         target = app / "PlugIns" / cached.name
         target.parent.mkdir(exist_ok=True)

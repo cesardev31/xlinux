@@ -209,6 +209,8 @@ def build(project_dir, debug=False, package=True):
     appkit.add_icons(project.ios / "Runner/Assets.xcassets/AppIcon.appiconset", project.app, info)
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
+    appkit.embed_entitlements(project.app / "Runner", appkit.entitlements_file(project.ios, "Runner/Info.plist"),
+                              variables["PRODUCT_BUNDLE_IDENTIFIER"], variables)
     extensions.build_all(project.ios, project.app, project.build_dir, project.debug)
     toolchain.thin_frameworks(project.app)
     if package:

@@ -311,6 +311,25 @@ def ensure_mcp_sdk():
     run([ensure_uv(), "pip", "install", "-q", "--python", python, "mcp", "pillow"], stdout=sys.stderr)
 
 
+def ensure_rcodesign():
+    """rcodesign (apple-codesign) in <data>/bin: writes the ad-hoc signature
+    carrying a target's entitlements, which xtool reads back when signing."""
+    found = _which("rcodesign")
+    if found:
+        return found
+    triple = f"{arch()}-unknown-linux-musl"
+    name, url = github_asset("indygreg/apple-platform-rs",
+                             lambda n: n.startswith("apple-codesign-") and n.endswith(f"{triple}.tar.gz"))
+    archive = download(url, config.data_dir() / "downloads" / name)
+    target = config.data_dir() / "bin/rcodesign"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tar:
+        member = next(m for m in tar.getmembers() if Path(m.name).name == "rcodesign" and m.isfile())
+        target.write_bytes(tar.extractfile(member).read())
+    target.chmod(0o755)
+    return str(target)
+
+
 def needs_uikit_preview(dirs):
     """Whether any Swift source under `dirs` uses `#Preview` from UIKit, which
     xtool's OpenAppleMacros doesn't implement (e.g. Stripe)."""

@@ -10,6 +10,9 @@
 patch adds empty stubs (like the existing `SwiftUIView` one: previews are only
 meaningful inside Xcode).
 
+`xlinux` builds and installs it by itself the first time a plugin needs it
+(`xlinux/core/deps.py`); by hand:
+
 Base: commit `e932208f5610a5024d3a043e202f0f67b926e1cf`.
 
 ```

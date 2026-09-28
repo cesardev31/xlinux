@@ -15,18 +15,21 @@ def _prepare_data_dir(data_dir):
         values["data_dir"] = str(data_dir)
         config.save_config(values)
     data = config.data_dir()
-    # A configured directory whose parent is gone is most likely an unmounted
-    # drive: don't create it on the system disk by accident.
-    if not data.exists() and not data_dir and data != config.DEFAULT_DATA_DIR and not data.parent.exists():
+    # A saved directory that's gone is most likely an unmounted drive (its
+    # mount point may still exist, empty): only create it when asked explicitly.
+    if not data.exists() and not data_dir and data != config.DEFAULT_DATA_DIR:
         sys.exit(f"error: data directory {data} not found (is the drive mounted? "
-                 "or choose another one with `xlinux setup --data-dir`)")
+                 "or choose another one with `xlinux setup --data-dir DIR`)")
     for sub in ("bin", "downloads", "tmp"):
         (data / sub).mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(data).free >> 30
-    log(f"Data directory: {data} ({free} GB free)")
+    log(f"Data directory: {data} ({free} GiB free)")
     if free < 30:
-        print("    warning: SDK, toolchains and dependencies take ~20-40 GB; "
-              "consider `--data-dir` on a bigger drive", file=sys.stderr)
+        print(f"""
+    warning: only {free} GiB free. The iOS SDK, toolchains and caches typically
+    take 20-40+ GiB (about what Xcode takes on a Mac). Recommended: 30 GiB or
+    more; `xlinux setup --data-dir DIR` puts everything on another drive.
+""", file=sys.stderr)
 
 
 def setup(adapters, data_dir=None, xip=None, everything=False):
@@ -62,9 +65,10 @@ def doctor(adapters):
     later = "installed automatically the first time it's needed"
     print("doctor\n")
     print("Core:")
-    ok = _check((data / "swiftly").is_dir(), f"data directory ({data})",
+    ok = _check(data.is_dir(), f"data directory ({data})" +
+                (f", {shutil.disk_usage(data).free >> 30} GiB free" if data.is_dir() else ""),
                 "run `xlinux setup` (is the drive mounted?)")
-    ok &= _check(config.swift_bin() is not None, "Swift toolchain", "run `xlinux setup`")
+    ok &= _check(config.swift_bin() is not None, "Swift toolchain (swiftly)", "run `xlinux setup`")
     ok &= _check(bool(which("xtool")), "xtool", "run `xlinux setup`")
     ok &= _check(config.IPHONE_SDK.exists(), "iOS SDK (from Xcode.xip)", "run `xlinux setup`")
     ok &= _check(config.pymobiledevice3_python().exists(), "pymobiledevice3", "run `xlinux setup`")
