@@ -350,6 +350,9 @@ class DebugSession:
 
     def start(self, launch_args):
         ensure_developer_image()
+        # Instances left from a previous session (install() skips this when
+        # the app didn't change) would still have a debugserver attached.
+        terminate(self.bundle_id)
         real_id, remote_app = installed_app(self.bundle_id)
         debug_port, control_port = free_port(), free_port()
 
