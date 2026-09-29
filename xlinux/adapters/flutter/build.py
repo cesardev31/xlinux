@@ -36,6 +36,7 @@ class Project:
         self.package = re.search(r"^name:\s*(\S+)", (self.dir / "pubspec.yaml").read_text(), re.M).group(1)
         self.debug = debug
         self.dart_defines = []
+        self.pods_build = None  # CocoaPods plugins (plugins.build)
         self.build_dir = self.dir / ("build/ios-linux-debug" if debug else "build/ios-linux")
         self.app = self.build_dir / "Runner.app"
         self.ipa = self.build_dir / f"{self.package}.ipa"
@@ -228,6 +229,8 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
         out = plugins.build(project, flutter_fw_parent)
         toolchain.pack_swiftpm_outputs(out, project.app, "Runner", skip_frameworks=("Flutter",))
         plugins.pack_pod_resources(project, project.app)
+        if project.pods_build:
+            project.pods_build.assemble(project.app)
     else:
         compile_runner(project, flutter_fw_parent, project.build_dir / "obj", project.app / "Runner")
 

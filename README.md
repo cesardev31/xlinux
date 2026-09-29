@@ -40,12 +40,13 @@ production Flutter apps.
 | Release (Dart AOT) builds, installs and launches fast | ✅ |
 | Debug with JIT + lldb (no sudo; faster with `tunneld`) | ✅ |
 | Hot reload (`flutter run` and the VS Code protocol), ~0.5 s | ✅ |
+| The app's `print()` output in `flutter run` and VS Code's debug console (forwarded from the iPhone's log) | ✅ |
 | iPhone listed in `flutter devices` / VS Code | ✅ |
 | Native assets (Dart build hooks, e.g. `objective_c`) in debug and release | ✅ |
 | Native plugins via SwiftPM: firebase_core, google_sign_in (Google login), flutter_stripe, webview, url_launcher, shared_preferences | ✅ |
 | CocoaPods-only plugins (podspec → SwiftPM conversion, no Ruby): Swift pods + xcframeworks, e.g. `flutter_validations_sdk` (Truora + TensorFlow Lite) | ✅ |
 | App extensions (e.g. WidgetKit widgets) from the Xcode project, Swift sources | ✅ |
-| Pods with Objective-C/C (Flutter's podspec → SwiftPM conversion) | ❌ |
+| CocoaPods-only plugins with Objective-C/C/C++: real CocoaPods (no Runner.xcodeproj changes) + the same pod builder as Expo, e.g. `device_info` | ✅ |
 | Expo / React Native, debug (expo-dev-client + Metro): `pod install`, 49 pods incl. React Native, Reanimated, Screens, Expo modules, Google Sign-In; tested with Expo 56 / RN 0.85 | ✅ |
 | Expo / React Native release: JavaScript bundled as Hermes bytecode, prebuilt frameworks switched to their release flavor, runs without Metro | ✅ |
 
@@ -55,7 +56,7 @@ production Flutter apps.
 |---|---|
 | `gen_snapshot` (Dart AOT → ARM64) | Flutter's macOS binary running under **Darling**, with `support/core/darling_compat.c` (reports macOS 12 from `uname` and emulates aligned `vm_map`, which Darling lacks and which crashed Dart's GC) |
 | Xcode compiling Runner (Swift/ObjC) | `swiftc`/`clang` + the iOS SDK extracted from `Xcode.xip` by **xtool** |
-| CocoaPods (`pod install`) | `xlinux/core/cocoapods.py`: reads podspecs (a minimal Ruby reader for local ones, CDN JSON for third-party ones), resolves versions, fetches sources without history and generates one `Package.swift` per pod; `resource_bundles` are assembled like CocoaPods does (actool included) |
+| CocoaPods (`pod install`) | `xlinux/core/cocoapods.py`: reads podspecs (a minimal Ruby reader for local ones, CDN JSON for third-party ones), resolves versions, fetches sources without history and generates one `Package.swift` per pod; `resource_bundles` are assembled like CocoaPods does (actool included). Pods with Objective-C/C/C++ go through real CocoaPods instead (`xlinux/adapters/flutter/pods.py`: Podfile in the data directory, `integrate_targets => false`, built with `core/xcode`) |
 | Xcode + SwiftPM building plugins | **Swift Build** (SwiftPM 6.4) with xtool's toolset; generates the same `FlutterGeneratedPluginSwiftPackage` as macOS, with the Runner as a SwiftPM executable |
 | `xcrun`, `clang`, `lipo`, `otool`, `install_name_tool`, `codesign` | `support/core/bin/`: our own xcrun, a clang that infers `-target` like Apple's, LLVM tools, a no-op codesign (xtool signs at the end) |
 | `actool` (asset catalogs → `Assets.car`) | `support/core/bin/actool`: imagesets to loose PNGs (`name@2x.png`), rasterized SVG/PDF (cairosvg / pdftocairo), AppIcon → `CFBundleIcons` |
@@ -94,12 +95,14 @@ xlinux/adapters/flutter/   everything Flutter-specific
   plugins.py               native plugins via SwiftPM (like `flutter build ios` on macOS)
   debug.py                 JIT helper + VM Service for `flutter run`/`attach`
   custom_device.py         the iPhone in `flutter devices` and VS Code
+  pods.py                  plugins with Objective-C/C pods, through real CocoaPods
 xlinux/adapters/expo/      Expo / React Native
   build.py                 expo prebuild, pod install, pods + app, .app
   jsi.py                   ExpoModulesJSI (the one Expo module built from source)
   macros.py                Expo's Swift macro plugin for Linux
 xlinux/mcp_server.py       MCP server (screenshots, touches, text, buttons, apps, hot reload, logs)
-support/core/              device_bridge.py, lldb_driver.py, darling_compat.c, xcodeproj_dump.rb
+support/core/              device_bridge.py, lldb_driver.py, darling_compat.c, xcodeproj_dump.rb,
+                           app_logs.py (the app's log lines for `flutter run` / VS Code)
 support/core/cocoapods/    CocoaPods on Linux: plist patch + stand-ins (xcodebuild, clang, ditto…)
 support/core/bin/          xcrun, actool, apple-clang, lipo, otool, install_name_tool, codesign
 support/flutter/           FlutterLinuxSceneDelegate.swift, flutter_lldb_helper.py
@@ -356,8 +359,7 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
 
 1. Dart changes without reinstalling (push the kernel into the app's container
    and launch with `--flutter-assets-dir`).
-2. Objective-C/C pods in the CocoaPods conversion.
-3. Expo / React Native: expo-splash-screen's overlay without ibtool (writing
+2. Expo / React Native: expo-splash-screen's overlay without ibtool (writing
    the compiled storyboard), upstreaming the `expo-modules-jsi` patch.
 
 ## Credits and licenses

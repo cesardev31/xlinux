@@ -23,6 +23,7 @@ from pathlib import Path
 
 from ...core import cocoapods, config, toolchain
 from ...core.util import log
+from . import pods
 
 GENERATED = "FlutterGeneratedPluginSwiftPackage"
 FRAMEWORK_PKG = "FlutterFramework"
@@ -77,7 +78,8 @@ def _symlink(link, target):
 def generate(project, spm_dir):
     packages = spm_dir / "Packages"
     rel = packages / ".packages"
-    plugins = swiftpm_plugins(project)
+    # Plugins with Objective-C/C pods are built with CocoaPods (pods.py).
+    plugins = [p for p in swiftpm_plugins(project) if not pods.needs_cocoapods(p[2])]
 
     # FlutterFramework: an empty target in Xcode too; plugins only depend on it
     # and find Flutter.framework through FRAMEWORK_SEARCH_PATHS.
@@ -227,8 +229,11 @@ def build(project, flutter_fw_parent):
     spm_dir = project.dir / f"build/ios-linux-spm-{mode}"
     plugins = generate(project, spm_dir)
     pkg = generate_runner(project, spm_dir)
-    names = ", ".join(n for n, _, _ in plugins)
-    fingerprint = native_fingerprint(project, spm_dir, plugins, flutter_fw_parent)
+    pod_plugins = [p for p in swiftpm_plugins(project) if pods.needs_cocoapods(p[2])]
+    project.pods_build = pods.build(project, pod_plugins, flutter_fw_parent) if pod_plugins else None
+    pod_flags = project.pods_build.swiftpm_flags() if project.pods_build else []
+    names = ", ".join(n for n, _, _ in plugins + pod_plugins)
+    fingerprint = native_fingerprint(project, spm_dir, plugins, flutter_fw_parent, pod_flags)
     stamp = spm_dir / "native.json"
     try:
         previous = json.loads(stamp.read_text())
@@ -247,14 +252,14 @@ def build(project, flutter_fw_parent):
                for dep in toolchain.exact_dependencies(package)]
     out = toolchain.swiftpm_build(pkg, project.debug, scratch_name=f"{project.package}-{mode}", shallow=shallow, extra_flags=[
         "-Xswiftc", "-F", "-Xswiftc", fw, "-Xcc", f"-F{fw}",
-        "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter"])
+        "-Xlinker", "-F", "-Xlinker", fw, "-Xlinker", "-framework", "-Xlinker", "Flutter", *pod_flags])
     if not (out / "Runner").exists():
         sys.exit(f"error: SwiftPM did not produce {out / 'Runner'}")
     stamp.write_text(json.dumps({"fingerprint": fingerprint, "out": str(out)}))
     return out
 
 
-def native_fingerprint(project, spm_dir, plugins, flutter_fw_parent):
+def native_fingerprint(project, spm_dir, plugins, flutter_fw_parent, pod_flags=()):
     """Fingerprint of everything that affects the native build: generated code
     (Runner, registrant, Package.swift), plugins and their versions, the
     engine, the mode and xlinux's own tools. If it doesn't change, `swift
@@ -262,6 +267,13 @@ def native_fingerprint(project, spm_dir, plugins, flutter_fw_parent):
     skipped."""
     h = hashlib.sha256()
     h.update(f"{project.debug}|{flutter_fw_parent}".encode())
+    # CocoaPods plugins: their flags, and the pods' static libraries they point to.
+    h.update(json.dumps(list(pod_flags)).encode())
+    if project.pods_build:
+        for lib in sorted(project.pods_build.pods.build_dir.glob("*-iphoneos/*/*.framework/*")) + \
+                sorted(project.pods_build.pods.build_dir.glob("*-iphoneos/*/lib*.a")):
+            if lib.is_file():
+                h.update(f"{lib}|{lib.stat().st_mtime_ns}".encode())
     for name, basename, package in plugins:
         h.update(f"{name}|{basename}|{package}".encode())
         if package.suffix == ".podspec":

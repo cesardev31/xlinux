@@ -140,7 +140,7 @@ class TargetBuild:
         for d in sorted({str(Path(h["path"]).parent) for h in self.t.get("headers", [])}):
             flags += ["-iquote", d]
         flags += ["-I", self.derived, "-I", self.out / "include", "-F", self.out]
-        for path in s.list("FRAMEWORK_SEARCH_PATHS"):
+        for path in s.list("FRAMEWORK_SEARCH_PATHS") + self.ctx.framework_paths:
             flags += ["-F", path]
         return drop_duplicates(flags, self.ctx.react_dups, self.ctx.react_overlay)
 
@@ -200,7 +200,7 @@ class TargetBuild:
             flags.append(f)
         for path in s.list("SWIFT_INCLUDE_PATHS"):
             flags += ["-I", path]
-        for path in s.list("FRAMEWORK_SEARCH_PATHS"):
+        for path in s.list("FRAMEWORK_SEARCH_PATHS") + self.ctx.framework_paths:
             flags += ["-F", path]
         flags += ["-F", self.out]
         for cond in s.list("SWIFT_ACTIVE_COMPILATION_CONDITIONS"):
@@ -327,10 +327,12 @@ class Context:
     """What every target build shares: prebuilt React Native rules and
     Linux builds of macOS-only Swift macro plugins ({executable name: path})."""
 
-    def __init__(self, pods_root, macro_plugins=None):
+    def __init__(self, pods_root, macro_plugins=None, framework_paths=()):
         self.react_dups = react_duplicates(pods_root)
         self.react_overlay = react_overlay(pods_root)
         self.macro_plugins = macro_plugins or {}
+        # Frameworks the host provides outside the project (e.g. Flutter.framework).
+        self.framework_paths = [str(p) for p in framework_paths]
 
 
 def compiles(target):

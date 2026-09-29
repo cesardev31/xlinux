@@ -84,7 +84,9 @@ def copy_resource(src, dest):
 
 
 def build_resource_bundles(pods):
-    """CocoaPods resource bundle targets (<Pod>-<Bundle>): only resources, no code."""
+    """CocoaPods resource bundle targets (<Pod>-<Bundle>): only resources, no
+    code. Returns the bundles."""
+    bundles = []
     for target in pods.targets.values():
         if target.get("product_type") != "com.apple.product-type.bundle":
             continue
@@ -99,6 +101,8 @@ def build_resource_bundles(pods):
                            "CFBundleName": bundle.stem, "CFBundlePackageType": "BNDL",
                            "CFBundleInfoDictionaryVersion": "6.0", "CFBundleVersion": "1",
                            "CFBundleShortVersionString": "1.0"}, f)
+        bundles.append(bundle)
+    return bundles
 
 
 def script_entries(script, command, configuration):
