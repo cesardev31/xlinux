@@ -21,8 +21,15 @@ def run_debug(project, engine_options, udid):
     args += [f"--vm-service-port={vm_port}", "--disable-service-auth-codes"]
     session = DebugSession(project.app, project.bundle_identifier(), udid,
                            lldb_helpers=[JIT_HELPER], forward_ports=[vm_port])
-    session.run_until_parent_exits(args, on_ready=lambda: print(
-        f"The Dart VM service is listening on http://127.0.0.1:{vm_port}/", flush=True))
+    # `flutter run` and VS Code read the app's output from this command's
+    # stdout: forward its print()s ("flutter: …") from the iPhone's log.
+    # Started before the launch so main()'s first prints aren't missed.
+    logs = device.forward_logs("Runner", "flutter: ", udid)
+    try:
+        session.run_until_parent_exits(args, on_ready=lambda: print(
+            f"The Dart VM service is listening on http://127.0.0.1:{vm_port}/", flush=True))
+    finally:
+        logs.terminate()
 
 
 def run_release(project):

@@ -199,6 +199,15 @@ def launch(bundle_id):
     run(["pymobiledevice3", "developer", "dvt", "launch", real_id], capture_output=True, text=True)
 
 
+def forward_logs(process_name, prefix, udid=None):
+    """Print the app's log messages starting with `prefix` to our stdout, in
+    the background (support/core/app_logs.py). Returns the process."""
+    cmd = [config.pymobiledevice3_python(), config.SUPPORT / "core/app_logs.py", process_name, prefix]
+    if udid:
+        cmd.append(udid)
+    return subprocess.Popen([str(c) for c in cmd], env=config.tool_env(), stderr=subprocess.DEVNULL)
+
+
 def stream_logs(process_name="Runner", match=None):
     cmd = ["pymobiledevice3", "syslog", "live", "-pn", process_name] + (["-m", match] if match else [])
     subprocess.run(cmd, env=config.tool_env())
