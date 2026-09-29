@@ -359,10 +359,6 @@ class DebugSession:
 
     def start(self, launch_args):
         ensure_developer_image()
-        # Instances left from a previous session (install() skips this when
-        # the app didn't change) would still have a debugserver attached.
-        terminate(self.bundle_id)
-        real_id, remote_app = installed_app(self.bundle_id)
         debug_port, control_port = free_port(), free_port()
 
         cmd = [config.pymobiledevice3_python(), config.SUPPORT / "core/device_bridge.py", "--udid", self.udid,
@@ -376,11 +372,15 @@ class DebugSession:
         log(f"iPhone tunnel: {bridge_info.get('TUNNEL', '?')}")
 
         control = socket.create_connection(("127.0.0.1", control_port), timeout=90)
-        control.sendall((json.dumps({"cmd": "launch", "bundle_id": real_id, "args": list(launch_args)}) + "\n").encode())
+        # The bridge finds the installed app (xtool may prefix its bundle id),
+        # stops orphaned instances and launches it, over its open connection.
+        control.sendall((json.dumps({"cmd": "launch", "bundle_id": self.bundle_id,
+                                     "args": list(launch_args)}) + "\n").encode())
         response = json.loads(control.makefile().readline() or "{}")
         if "pid" not in response:
             control.close()
             sys.exit(f"error: iOS did not launch the app: {response.get('error', 'no response')}")
+        remote_app = response["path"]
 
         self.stop_file = tempfile.mktemp(prefix="xlinux-stop-")
         env = config.tool_env()

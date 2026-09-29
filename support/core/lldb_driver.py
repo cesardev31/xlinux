@@ -62,7 +62,9 @@ def run(debugger, helpers, local_app, pid, debugserver, remote_app):
     cmd("platform select remote-ios")
     # lldb on Linux doesn't open .app bundles: give it the executable inside.
     executable = os.path.join(local_app, "Runner")
-    cmd(f'target create --arch arm64-apple-ios "{executable}"')
+    # Dependents are loaded from the process once attached (through the
+    # search-path mapping below); loading them here only costs seconds.
+    cmd(f'target create --arch arm64-apple-ios --no-dependents=true "{executable}"')
     target = debugger.GetSelectedTarget()
     cmd(f'target modules search-paths add "{remote_app}" "{local_app}"')
     # In synchronous mode `process connect` with no process waits for a "stop"
