@@ -2,6 +2,11 @@
 
     app_logs.py <process name> <message prefix> [udid]
 
+Forwards what the app's own code logs (anything logged from inside its bundle:
+the app, its frameworks, e.g. Flutter's engine errors and plugins' NSLog) plus
+any message starting with <message prefix>; system libraries' noise (UIKit,
+networking...) is left out, as Xcode's and Flutter's consoles do.
+
 Runs on pymobiledevice3's Python. Frameworks' tools read a device's logs from
 the tool that launches the app (e.g. a Flutter custom device's runDebug
 output): this is what lets `print()` show up in `flutter run` and VS Code.
@@ -32,7 +37,8 @@ async def main(process, prefix, udid):
             if Path(getattr(entry, "filename", "") or "").name != process:
                 continue
             message = str(getattr(entry, "message", ""))
-            if message.startswith(prefix):
+            image = str(getattr(entry, "image_name", "") or "")
+            if message.startswith(prefix) or "/Bundle/Application/" in image:
                 print(message, flush=True)
 
 
