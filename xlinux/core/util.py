@@ -6,8 +6,31 @@ import sys
 from . import config
 
 
+_terminal = None
+
+
+def show_progress_in_terminal():
+    """When a framework's tool runs us with our output captured (Flutter hides
+    a custom device's install output unless it fails), also write progress to
+    the controlling terminal, so `flutter run` doesn't look frozen for minutes.
+    Only for those commands: never where a terminal UI owns /dev/tty."""
+    global _terminal
+    if sys.stderr.isatty():
+        return
+    try:
+        _terminal = open("/dev/tty", "w")
+    except OSError:
+        _terminal = None  # no terminal (e.g. VS Code)
+
+
 def log(msg):
-    print(f"\033[1;36m==>\033[0m {msg}", file=sys.stderr, flush=True)
+    line = f"\033[1;36m==>\033[0m {msg}"
+    print(line, file=sys.stderr, flush=True)
+    if _terminal:
+        try:
+            print(f"\r\033[K{line}", file=_terminal, flush=True)
+        except OSError:
+            pass
 
 
 def run(cmd, check=True, **kw):

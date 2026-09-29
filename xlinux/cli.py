@@ -9,7 +9,7 @@ from .adapters import expo, flutter
 from .adapters.expo import build as expo_build
 from .adapters.flutter import build as flutter_build
 from .adapters.flutter import debug as flutter_debug
-from .core import device, setup
+from .core import device, setup, util
 
 ADAPTERS = [flutter, expo]
 
@@ -78,6 +78,7 @@ def cmd_device_ping(_args):
 
 
 def cmd_device_install(_args):
+    util.show_progress_in_terminal()
     # `flutter run` already built its bundle for "linux"; we install our own iOS
     # build of the same project (Flutter runs these commands from its root).
     project = flutter_build.build(os.getcwd(), debug=True, package=False,

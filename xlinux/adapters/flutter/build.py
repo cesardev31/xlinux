@@ -252,6 +252,16 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
         "FLUTTER_BUILD_NUMBER": xc.get("FLUTTER_BUILD_NUMBER", "1"),
     }
     info = appkit.info_plist(project.ios / "Runner/Info.plist", variables, scene_delegate=SCENE_DELEGATE)
+    if debug:
+        # What `flutter build ios` adds in debug so the Dart VM service can be
+        # advertised on the local network (otherwise: "Failed to register Dart
+        # VM Service port with mDNS").
+        services = info.setdefault("NSBonjourServices", [])
+        if "_dartVmService._tcp" not in services:
+            services.append("_dartVmService._tcp")
+        info.setdefault("NSLocalNetworkUsageDescription",
+                        "Allow Flutter tools on your computer to connect and debug your application. "
+                        "This prompt will not appear on release builds.")
     appkit.add_icons(project.ios / "Runner/Assets.xcassets/AppIcon.appiconset", project.app, info)
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
