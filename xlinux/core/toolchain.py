@@ -6,7 +6,7 @@ import shutil
 import sys
 
 from . import config, deps
-from .util import log, output, run
+from .util import log, output, run, run_progress
 
 
 def target():
@@ -123,7 +123,7 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
     env["XCODE_EXTRA_PLATFORM_FOLDERS"] = str(config.XTOOL_SDK / "Developer/Platforms")
     env["PATH"] = f"{config.TOOLSET_BIN}:{env['PATH']}"
     env.pop("SDKROOT", None)
-    run(["swift", "build", "--build-system", "swiftbuild", "--triple", "arm64-apple-ios",
+    returncode, out = run_progress(["swift", "build", "--build-system", "swiftbuild", "--triple", "arm64-apple-ios",
          "--toolset", config.XTOOL_SDK / "toolset-swb.json", "-c", configuration,
          "--package-path", package, "--scratch-path", scratch, "--config-path", config_path,
          "--cache-path", config.data_dir() / "swiftpm-cache",
@@ -132,9 +132,21 @@ def swiftpm_build(package, debug, extra_flags=(), scratch_name=None, shallow=())
          # Build's doesn't.
          "-Xswiftc", "-Xfrontend", "-Xswiftc", "-enable-cross-import-overlays",
          *extra_flags],
-        cwd=package, env=env)
+        _swift_build_progress, cwd=package, env=env)
+    if returncode != 0:
+        errors = [line for line in out.splitlines() if "error:" in line]
+        sys.exit("error: swift build failed:\n" + "\n".join((errors or out.splitlines())[-40:]))
     products = scratch / "out/Products" / f"{configuration.capitalize()}-iphoneos"
     return products if products.is_dir() else scratch / "arm64-apple-ios" / configuration
+
+
+def _swift_build_progress(line):
+    """Swift Build prints "[345 / 700] StripeCore": show it as a percentage."""
+    m = re.match(r"\[(\d+)\s*/\s*(\d+)\]\s*(.*)", line)
+    if m and int(m.group(2)):
+        done, total = int(m.group(1)), int(m.group(2))
+        return f"Native code (SwiftPM): {done * 100 // total}% ({done}/{total}) {m.group(3)}".rstrip()
+    return None
 
 
 FAT_MAGICS = (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")

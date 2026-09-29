@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import signal
 import socket
 import struct
@@ -18,7 +19,7 @@ import zipfile
 from pathlib import Path
 
 from . import config
-from .util import log, output, run
+from .util import log, output, run, run_progress
 
 
 def pmd3(*args, **kw):
@@ -84,12 +85,16 @@ def _content_hash(path):
 
 def _xtool_install(ipa, udid):
     cmd = ["xtool", "install", ipa] + (["--udid", udid] if udid else [])
-    try:
-        result = run(cmd, capture_output=True, text=True, check=False, timeout=INSTALL_TIMEOUT)
-    except subprocess.TimeoutExpired:
+    returncode, out = run_progress(cmd, _xtool_progress, timeout=INSTALL_TIMEOUT)
+    if returncode is None:
         return False, "timeout"
-    out = (result.stdout or "") + (result.stderr or "")
     return "Successfully installed" in out, out
+
+
+def _xtool_progress(line):
+    """xtool redraws "[Installing]  45%" (and Signing, Packaging…): one line."""
+    m = re.match(r"\[([^\]]+)\]\s*(\d+%)?", line.strip())
+    return f"Installing on the iPhone (xtool): {m.group(1)} {m.group(2) or ''}".rstrip() if m else None
 
 
 def _container(path):

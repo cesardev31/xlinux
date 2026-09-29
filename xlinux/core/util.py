@@ -2,6 +2,7 @@ import fcntl
 import os
 import subprocess
 import sys
+import threading
 
 from . import config
 
@@ -31,6 +32,64 @@ def log(msg):
             print(f"\r\033[K{line}", file=_terminal, flush=True)
         except OSError:
             pass
+
+
+_progress_shown = False
+
+
+def progress(msg):
+    """One line that keeps updating (build/install percentages), on the
+    terminal the user is looking at."""
+    global _progress_shown
+    target = _terminal or (sys.stderr if sys.stderr.isatty() else None)
+    if target:
+        try:
+            print(f"\r\033[K\033[1;36m==>\033[0m {msg}", end="", file=target, flush=True)
+            _progress_shown = True
+        except OSError:
+            pass
+
+
+def progress_done():
+    global _progress_shown
+    if _progress_shown:
+        target = _terminal or sys.stderr
+        try:
+            print("\r\033[K", end="", file=target, flush=True)
+        except OSError:
+            pass
+        _progress_shown = False
+
+
+def run_progress(cmd, parse, timeout=None, **kw):
+    """Run a command whose output reports progress, showing it on one updating
+    line. `parse(line)` returns a progress message or None. Returns
+    (returncode, output); returncode is None on timeout."""
+    cmd = [str(c) for c in cmd]
+    if os.environ.get("XLINUX_VERBOSE"):
+        print("   $ " + " ".join(cmd), file=sys.stderr, flush=True)
+    kw.setdefault("env", config.tool_env())
+    # Universal newlines: tools redraw their progress with "\r".
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            errors="replace", **kw)
+    fired = []
+    timer = threading.Timer(timeout, lambda: (fired.append(True), proc.kill())) if timeout else None
+    if timer:
+        timer.start()
+    lines = []
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            lines.append(line)
+            message = parse(line)
+            if message:
+                progress(message)
+        proc.wait()
+    finally:
+        if timer:
+            timer.cancel()
+        progress_done()
+    return (None if fired else proc.returncode), "\n".join(lines)
 
 
 def run(cmd, check=True, **kw):
