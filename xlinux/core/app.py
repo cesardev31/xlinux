@@ -83,7 +83,10 @@ def read_xcconfig(path):
 def expand(value, variables):
     """Replace $(VARIABLE) the way Xcode does when processing the Info.plist."""
     if isinstance(value, str):
-        return re.sub(r"\$\(([A-Z_]+)\)", lambda m: variables.get(m.group(1), ""), value)
+        if hasattr(variables, "expand"):
+            return variables.expand(value)
+        return re.sub(r"\$\(([A-Za-z0-9_]+)\)|\$\{([A-Za-z0-9_]+)\}",
+                      lambda m: variables.get(m.group(1) or m.group(2), ""), value)
     if isinstance(value, list):
         return [expand(v, variables) for v in value]
     if isinstance(value, dict):

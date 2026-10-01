@@ -47,6 +47,7 @@ class XcodeProject:
             "EFFECTIVE_PLATFORM_NAME": "-iphoneos", "PLATFORM_NAME": "iphoneos",
             "SDKROOT": str(sdk), "SDK_DIR": str(sdk), "PLATFORM_DIR": str(sdk.parent.parent.parent),
             "TARGET_NAME": name, "PRODUCT_NAME": own.get("PRODUCT_NAME", "$(TARGET_NAME)"),
+            "EXECUTABLE_NAME": name, "PRODUCT_MODULE_NAME": name,
             "DEVELOPMENT_LANGUAGE": "en", "ARCHS": "arm64", "CURRENT_ARCH": "arm64",
             "LOCAL_LIBRARY_DIR": "/Library", "DT_TOOLCHAIN_DIR": "",
             # Xcode's default, which settings extend with $(inherited).

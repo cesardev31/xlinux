@@ -26,6 +26,22 @@ def pmd3(*args, **kw):
     return output(["pymobiledevice3", *args], **kw)
 
 
+def tunnel():
+    """Run pymobiledevice3's kernel tunnel in the foreground, with sudo if needed.
+
+    Resolve the user's data directory before elevating: root has a different
+    home directory and cannot discover the user's xlinux configuration.
+    """
+    executable = config.pymobiledevice3_python().parent / "pymobiledevice3"
+    if not executable.is_file():
+        sys.exit(f"error: pymobiledevice3 not found at {executable} (run `xlinux setup`)")
+    command = [str(executable), "remote", "tunneld"]
+    if os.geteuid() != 0:
+        command.insert(0, "sudo")
+    log("Starting the iPhone kernel tunnel (needs root). Keep this terminal open; Ctrl+C stops it.")
+    return subprocess.call(command)
+
+
 def connected_devices():
     """[(udid, name)] of the iPhones connected over USB."""
     try:

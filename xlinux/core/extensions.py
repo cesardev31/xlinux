@@ -19,7 +19,8 @@ from .util import log
 
 
 class Extension:
-    def __init__(self, name, directory, info_plist, bundle_id, entitlements=None):
+    def __init__(self, name, directory, info_plist, bundle_id, entitlements=None, settings=None):
+        self.settings = settings
         self.name = name
         self.entitlements = entitlements
         self.dir = directory
@@ -30,10 +31,19 @@ class Extension:
         return sorted(p for p in self.dir.rglob("*.swift"))
 
 
-def discover(ios_dir, app_bundle_id):
+def discover(ios_dir, app_bundle_id, xcode=None):
     """Extension targets of the Xcode project in `ios_dir`."""
     found = {}
-    for settings in appkit.build_settings(ios_dir):
+    if xcode:
+        targets = [t for t in xcode.targets.values()
+                   if t.get("product_type") == "com.apple.product-type.app-extension"]
+        for target in targets:
+            if not target.get("configuration_available", True):
+                raise SystemExit(f"error: {target['name']} has no {xcode.configuration} configuration")
+        settings_list = [xcode.settings(t) for t in targets]
+    else:
+        settings_list = appkit.build_settings(ios_dir)
+    for settings in settings_list:
         plist_path = settings.get("INFOPLIST_FILE", "")
         if not plist_path or plist_path in found:
             continue
@@ -48,7 +58,7 @@ def discover(ios_dir, app_bundle_id):
         entitlements = settings.get("CODE_SIGN_ENTITLEMENTS")
         entitlements = ios_dir / entitlements if entitlements else None
         found[plist_path] = Extension(name, plist.parent, plist, bundle_id,
-                                      entitlements if entitlements and entitlements.exists() else None)
+                                      entitlements if entitlements and entitlements.exists() else None, settings)
     return list(found.values())
 
 
@@ -61,7 +71,7 @@ def _info_plist(ext, app_info):
         "CURRENT_PROJECT_VERSION": app_info.get("CFBundleVersion", "1"),
     }
     with open(ext.info_plist, "rb") as f:
-        info = appkit.expand(plistlib.load(f), variables)
+        info = appkit.expand(plistlib.load(f), ext.settings or variables)
     info.update({
         "CFBundleExecutable": ext.name,
         "CFBundleIdentifier": ext.bundle_id,
@@ -80,7 +90,12 @@ def _info_plist(ext, app_info):
 
 def _fingerprint(ext, info, debug):
     h = hashlib.sha256(Path(__file__).read_bytes())  # compile flags live in this file
+    if ext.settings:
+        keys = set(ext.settings.builtins).union(*(set(layer) for layer in ext.settings.layers))
+        h.update(repr(sorted((k, ext.settings.get(k)) for k in keys)).encode())
     h.update(repr((sorted(info.items(), key=str), debug, config.MIN_IOS, str(config.IPHONE_SDK))).encode())
+    if ext.entitlements:
+        h.update(ext.entitlements.read_bytes())
     for path in sorted(p for p in ext.dir.rglob("*") if p.is_file()):
         h.update(str(path.relative_to(ext.dir)).encode())
         h.update(path.read_bytes())
@@ -113,11 +128,11 @@ def _compile(ext, appex, debug):
         log(f"warning: {ext.name}: Assets.xcassets isn't compiled for extensions yet")
 
 
-def build_all(ios_dir, app, build_dir, debug):
+def build_all(ios_dir, app, build_dir, debug, xcode=None):
     """Compile every extension into `app`/PlugIns. Returns the extension names."""
     with open(app / "Info.plist", "rb") as f:
         app_info = plistlib.load(f)
-    extensions = discover(ios_dir, app_info["CFBundleIdentifier"])
+    extensions = discover(ios_dir, app_info["CFBundleIdentifier"], xcode)
     for ext in extensions:
         info = _info_plist(ext, app_info)
         cached = build_dir / "extensions" / f"{ext.name}.appex"
@@ -131,7 +146,7 @@ def build_all(ios_dir, app, build_dir, debug):
             with open(cached / "Info.plist", "wb") as f:
                 plistlib.dump(info, f)
             appkit.embed_entitlements(cached / ext.name, ext.entitlements, ext.bundle_id,
-                                      {"PRODUCT_BUNDLE_IDENTIFIER": ext.bundle_id})
+                                      ext.settings or {"PRODUCT_BUNDLE_IDENTIFIER": ext.bundle_id})
             stamp.write_text(fingerprint)
         target = app / "PlugIns" / cached.name
         target.parent.mkdir(exist_ok=True)

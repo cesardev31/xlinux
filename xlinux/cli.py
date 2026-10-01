@@ -36,6 +36,7 @@ def _dart_defines(args):
 
 
 def _add_dart_define_options(p):
+    p.add_argument("--flavor", help="Flutter: Xcode configuration suffix (e.g. qa selects Release-qa)")
     p.add_argument("--dart-define", action="append", default=[], metavar="KEY=VALUE",
                    help="like flutter's --dart-define (repeatable)")
     p.add_argument("--dart-define-from-file", action="append", default=[], metavar="FILE",
@@ -48,7 +49,7 @@ def cmd_build(args):
         if args.install:
             device.install(project.app, device.first_device()[0])
         return
-    project = flutter_build.build(args.project, debug=args.debug, dart_defines=_dart_defines(args))
+    project = flutter_build.build(args.project, debug=args.debug, dart_defines=_dart_defines(args), flavor=args.flavor)
     if args.install:
         device.install(project.ipa, device.first_device()[0])
 
@@ -65,13 +66,17 @@ def cmd_run(args):
         else:
             expo.run_debug(project)
         return
-    project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args))
+    project = flutter_build.build(args.project, debug=False, dart_defines=_dart_defines(args), flavor=args.flavor)
     device.install(project.ipa, device.first_device()[0])
     project.lock.release()  # the logs below can run for hours
     flutter_debug.run_release(project)
 
 
 # --- Commands called by `flutter` (custom device), see adapters/flutter/custom_device.py ---
+
+def cmd_device_tunnel(_args):
+    return device.tunnel()
+
 
 def cmd_device_ping(_args):
     sys.exit(0 if device.connected_devices() else 1)
@@ -82,7 +87,8 @@ def cmd_device_install(_args):
     # `flutter run` already built its bundle for "linux"; we install our own iOS
     # build of the same project (Flutter runs these commands from its root).
     project = flutter_build.build(os.getcwd(), debug=True, package=False,
-                                  kernel=flutter_build.flutter_run_kernel(os.getcwd()))
+                                  kernel=flutter_build.flutter_run_kernel(os.getcwd()),
+                                  flavor=flutter_build.flutter_run_flavor())
     device.install(project.app, device.first_device()[0])
 
 
@@ -91,7 +97,7 @@ def cmd_device_uninstall(_args):
 
 
 def cmd_device_run_debug(args):
-    project = flutter_build.Project(os.getcwd(), debug=True)
+    project = flutter_build.Project(os.getcwd(), debug=True, flavor=flutter_build.flutter_run_flavor())
     flutter_debug.run_debug(project, args.engine_options, device.first_device()[0])
 
 
@@ -170,6 +176,7 @@ def main():
 
     p = sub.add_parser("device", help="device commands (also used internally by the Flutter custom device)")
     dsub = p.add_subparsers(dest="device_command", required=True)
+    dsub.add_parser("tunnel", help="start the iPhone kernel tunnel (asks for sudo; Ctrl+C to stop)").set_defaults(func=cmd_device_tunnel)
     dsub.add_parser("ping").set_defaults(func=cmd_device_ping)
     dsub.add_parser("install").set_defaults(func=cmd_device_install)
     dsub.add_parser("uninstall").set_defaults(func=cmd_device_uninstall)

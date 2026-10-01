@@ -20,6 +20,7 @@ xlinux run                         # Flutter: release build, install, launch, lo
                                    # Expo: debug build, install, launch, Metro
 xlinux run --release               # Expo: release build (JS bundled), install, launch, logs
 xlinux build [--debug] [--install] [--project DIR]
+xlinux run --flavor qa --dart-define-from-file config/qa.json
 xlinux doctor                      # diagnostics
 xlinux setup                       # prepare the environment (once)
 xlinux mcp                         # MCP server for AI agents (see below)
@@ -160,8 +161,11 @@ From a git checkout, `bin/xlinux` works the same way. To publish a release
 Recommended for debugging (much faster), in another terminal:
 
 ```
-sudo <data>/uv-tools/pymobiledevice3/bin/pymobiledevice3 remote tunneld
+xlinux device tunnel
 ```
+
+The command uses the configured data directory and asks for sudo when needed.
+Keep it running in that terminal; Ctrl+C stops the tunnel.
 
 On the iPhone: enable Developer Mode and trust your Apple ID (Settings →
 General → VPN & Device Management).
@@ -408,3 +412,19 @@ in the hope that it will be useful, but **without any warranty**. See
 The third-party components listed above keep their own licenses.
 `support/flutter/flutter_lldb_helper.py` derives from Flutter (BSD-3-Clause) and
 keeps its notice; the patch in `support/patches/` applies to OpenAppleMacros (MIT).
+
+### Flutter flavors
+
+`xlinux build --flavor qa` and `xlinux run --flavor qa` select `Release-qa`;
+`xlinux build --debug --flavor qa` selects `Debug-qa`. These configurations
+must exist on Runner and its extension targets in `ios/Runner.xcodeproj`.
+Without `--flavor`, the configuration remains Debug or Release.
+The selected configuration supplies bundle IDs, display names, plist variables
+and entitlements, including app groups. The flavor is also passed to Flutter
+assemble so Dart's `appFlavor` and flavor-specific assets work.
+
+For hot reload, use `flutter run -d iphone-linux --flavor qa`. The custom-device
+commands recover the flavor from the running Flutter process on Linux.
+
+Regression tests: `python3 -m unittest discover -s tests -v`. The project fixture
+test requires xlinux's installed CocoaPods Ruby and `xcodeproj` gem.

@@ -28,6 +28,7 @@ targets = project.targets.map do |t|
   config = t.build_configurations.find { |c| c.name == configuration }
   entry = {
     name: t.name,
+    configuration_available: !config.nil?,
     kind: t.isa,
     product_type: t.respond_to?(:product_type) ? t.product_type : nil,
     settings: settings_of(config),

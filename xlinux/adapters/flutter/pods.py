@@ -102,7 +102,7 @@ def build(project, plugins, flutter_fw_parent):
 platform :ios, '{config.MIN_IOS}'
 install! 'cocoapods', :integrate_targets => false
 use_frameworks! :linkage => :static
-project '{project.ios / 'Runner.xcodeproj'}'
+project '{project.ios / 'Runner.xcodeproj'}', '{project.configuration}' => :{'debug' if project.debug else 'release'}
 
 target '{TARGET}' do
   pod 'Flutter', :path => 'Flutter'
@@ -118,7 +118,7 @@ end
         if result.returncode:
             sys.exit(f"error: pod install failed:\n{(result.stdout + result.stderr)[-4000:]}")
 
-    configuration = "Debug" if project.debug else "Release"
+    configuration = project.configuration
     ruby = deps.ensure_cocoapods()
     pods = xproject.XcodeProject(xproject.dump(work / "Pods/Pods.xcodeproj", configuration, ruby),
                                  work / "build", configuration)

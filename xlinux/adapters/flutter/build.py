@@ -8,6 +8,7 @@ then:     Runner (+ plugins via SwiftPM), Runner.app, .ipa
 
 import base64
 import json
+import os
 import plistlib
 import re
 import shutil
@@ -19,6 +20,7 @@ from pathlib import Path
 from ...core import app as appkit
 from ...core import config, deps, extensions, toolchain
 from ...core.util import DirLock, log, output, run
+from ...core.xcode import project as xproject
 from . import plugins
 
 ENGINE_BASE_URL = "https://storage.googleapis.com/flutter_infra_release/flutter"
@@ -28,13 +30,16 @@ SCENE_DELEGATE = "Runner.FlutterLinuxSceneDelegate"
 
 
 class Project:
-    def __init__(self, path, debug):
+    def __init__(self, path, debug, flavor=None):
         self.dir = Path(path).resolve()
         if not (self.dir / "pubspec.yaml").exists():
             sys.exit(f"error: {self.dir} is not a Flutter project (no pubspec.yaml)")
         self.ios = self.dir / "ios"
         self.package = re.search(r"^name:\s*(\S+)", (self.dir / "pubspec.yaml").read_text(), re.M).group(1)
         self.debug = debug
+        self.flavor = flavor
+        self.configuration = ("Debug" if debug else "Release") + (f"-{flavor}" if flavor else "")
+        self.xcode = None
         self.dart_defines = []
         self.pods_build = None  # CocoaPods plugins (plugins.build)
         self.build_dir = self.dir / ("build/ios-linux-debug" if debug else "build/ios-linux")
@@ -42,7 +47,22 @@ class Project:
         self.ipa = self.build_dir / f"{self.package}.ipa"
 
     def bundle_identifier(self):
-        return appkit.bundle_identifier(self.ios / "Runner.xcodeproj", exclude=("RunnerTests",))
+        return self.runner_settings().get("PRODUCT_BUNDLE_IDENTIFIER")
+
+    def load_settings(self):
+        description = xproject.dump(self.ios / "Runner.xcodeproj", self.configuration, deps.ensure_cocoapods())
+        self.xcode = xproject.XcodeProject(description, self.build_dir, self.configuration)
+        runner = self.xcode.targets.get("Runner")
+        if not runner or not runner.get("configuration_available", True):
+            sys.exit(f"error: Runner has no {self.configuration} configuration")
+
+    def runner_settings(self):
+        if self.xcode is None:
+            self.load_settings()
+        settings = self.xcode.settings(self.xcode.targets["Runner"])
+        settings.builtins.update(EXECUTABLE_NAME="Runner", PRODUCT_MODULE_NAME="Runner",
+                                 FLUTTER_BUILD_NAME="1.0.0", FLUTTER_BUILD_NUMBER="1")
+        return settings
 
 
 def flutter_info():
@@ -130,12 +150,14 @@ def assemble(project, frameworks):
     out = project.build_dir / "assemble"
     run(["flutter", "--no-version-check", "assemble", f"--output={out}/",
          "-dTargetPlatform=ios", "-dIosArchs=arm64", "-dTargetFile=lib/main.dart",
-         f"-dBuildMode={mode}", f"-dConfiguration={mode.capitalize()}", f"-dSdkRoot={config.IPHONE_SDK}",
+         f"-dBuildMode={mode}", f"-dConfiguration={project.configuration}", f"-dSdkRoot={config.IPHONE_SDK}",
          f"-dTrackWidgetCreation={'true' if project.debug else 'false'}",
          f"-dTreeShakeIcons={'false' if project.debug else 'true'}", "-dDartObfuscation=false",
          "-dSplitDebugInfo=", "-dAction=build", f"-dSrcRoot={project.ios}",
          # Same encoding as flutter_tools: each KEY=VALUE in base64, comma-separated.
-         "-dDartDefines=" + ",".join(base64.b64encode(d.encode()).decode() for d in project.dart_defines),
+         # --DartDefines (like xcode_backend): -d splits its values on commas.
+         "--DartDefines=" + ",".join(base64.b64encode(d.encode()).decode() for d in project.dart_defines),
+         *([f"-dFlavor={project.flavor}"] if project.flavor else []),
          f"{mode}_ios_bundle_flutter_assets"],
         cwd=project.dir, capture_output=True, text=True)
     shutil.copytree(out / "App.framework", frameworks / "App.framework", symlinks=True, dirs_exist_ok=True)
@@ -163,6 +185,29 @@ def compile_runner(project, flutter_fw_parent, obj, executable):
     args += [*toolchain.builtins(), "-framework", "Flutter", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
              "-o", executable]
     toolchain.swiftc(args)
+
+
+def flutter_run_flavor():
+    """Custom-device commands do not receive BuildInfo. Recover --flavor from
+    the active Flutter process, rather than stale generated Xcode settings.
+    Linux /proc is available on the platform supported by this adapter.
+    """
+    pid = os.getppid()
+    while pid > 1:
+        try:
+            args = Path(f"/proc/{pid}/cmdline").read_bytes().decode().rstrip("\0").split("\0")
+            if any(a.endswith("flutter_tools.snapshot") or a.endswith("flutter_tools.dart") for a in args):
+                for i, arg in enumerate(args):
+                    if arg.startswith("--flavor="):
+                        return arg.split("=", 1)[1]
+                    if arg == "--flavor" and i + 1 < len(args):
+                        return args[i + 1]
+                return None
+            status = Path(f"/proc/{pid}/status").read_text()
+            pid = int(re.search(r"^PPid:\s*(\d+)", status, re.M).group(1))
+        except (OSError, ValueError, AttributeError, UnicodeError):
+            return None
+    return None
 
 
 def flutter_run_kernel(project_dir):
@@ -197,7 +242,7 @@ def read_dart_defines(defines=(), files=()):
     return result
 
 
-def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
+def build(project_dir, debug=False, package=True, kernel=None, dart_defines=(), flavor=None):
     """Build the app and return the Project with Runner.app (and the .ipa if
     `package`; installing on the iPhone only needs the uncompressed .app).
     `kernel`: debug kernel to ship instead of the one `flutter assemble` makes.
@@ -206,7 +251,7 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
     toolchain.require_sdk()
     if not debug:
         deps.ensure_darling()  # gen_snapshot (Dart AOT) runs in Darling
-    project = Project(project_dir, debug)
+    project = Project(project_dir, debug, flavor)
     project.dart_defines = list(dart_defines)
     # Held until the process exits: installing reads the .app we build here.
     project.lock = DirLock(project.build_dir, f"{project.package} ({'debug' if debug else 'release'})")
@@ -222,6 +267,7 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
     frameworks.mkdir(parents=True)
 
     run(["flutter", "pub", "get"], cwd=project.dir, stdout=subprocess.DEVNULL)
+    project.load_settings()
     assemble(project, frameworks)
     if debug and kernel:
         shutil.copyfile(kernel, app_framework / "flutter_assets/kernel_blob.bin")
@@ -243,15 +289,9 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
     shutil.copytree(flutter_fw_parent / "Flutter.framework", frameworks / "Flutter.framework",
                     ignore=shutil.ignore_patterns("_CodeSignature", "Headers", "Modules", "module.modulemap"))
 
-    xc = appkit.read_xcconfig(project.ios / "Flutter/Generated.xcconfig")
-    variables = {
-        "EXECUTABLE_NAME": "Runner", "PRODUCT_NAME": "Runner", "PRODUCT_MODULE_NAME": "Runner",
-        "DEVELOPMENT_LANGUAGE": "en",
-        "PRODUCT_BUNDLE_IDENTIFIER": project.bundle_identifier(),
-        "FLUTTER_BUILD_NAME": xc.get("FLUTTER_BUILD_NAME", "1.0.0"),
-        "FLUTTER_BUILD_NUMBER": xc.get("FLUTTER_BUILD_NUMBER", "1"),
-    }
-    info = appkit.info_plist(project.ios / "Runner/Info.plist", variables, scene_delegate=SCENE_DELEGATE)
+    variables = project.runner_settings()
+    info_path = project.ios / variables.get("INFOPLIST_FILE", "Runner/Info.plist")
+    info = appkit.info_plist(info_path, variables, scene_delegate=SCENE_DELEGATE)
     if debug:
         # What `flutter build ios` adds in debug so the Dart VM service can be
         # advertised on the local network (otherwise: "Failed to register Dart
@@ -265,9 +305,10 @@ def build(project_dir, debug=False, package=True, kernel=None, dart_defines=()):
     appkit.add_icons(project.ios / "Runner/Assets.xcassets/AppIcon.appiconset", project.app, info)
     appkit.copy_loose_resources(project.ios / "Runner", project.app)
     appkit.write_info_plist(project.app, info)
-    appkit.embed_entitlements(project.app / "Runner", appkit.entitlements_file(project.ios, "Runner/Info.plist"),
-                              variables["PRODUCT_BUNDLE_IDENTIFIER"], variables)
-    extensions.build_all(project.ios, project.app, project.build_dir, project.debug)
+    entitlements = variables.get("CODE_SIGN_ENTITLEMENTS")
+    appkit.embed_entitlements(project.app / "Runner", project.ios / entitlements if entitlements else None,
+                              variables.get("PRODUCT_BUNDLE_IDENTIFIER"), variables)
+    extensions.build_all(project.ios, project.app, project.build_dir, project.debug, xcode=project.xcode)
     toolchain.thin_frameworks(project.app)
     if package:
         appkit.package_ipa(project.app, project.ipa)
