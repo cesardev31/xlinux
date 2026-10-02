@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ...core import config, deps, extensions, toolchain
 from ...core.util import DirLock, log
-from ...core.xcode import assets
+from ...core.xcode import appintents, assets
 from ...core.xcode import build as xbuild
 from ...core.xcode import package, project as xproject
 
@@ -125,15 +125,20 @@ def build(project_dir, debug=True, target=None, configuration=None):
         if symbols:
             target = {**target, "sources": target["sources"] + [{"path": str(symbols), "flags": None}]}
         log(f"{name} ({len(target['sources'])} files)")
-        objects = xbuild.TargetBuild(xcode, target, settings, context).compile()
+        app_build = xbuild.TargetBuild(xcode, target, settings, context)
+        objects = app_build.compile()
         product = settings.get("PRODUCT_NAME") or name
         app_dir = Path(settings.get("CONFIGURATION_BUILD_DIR")) / f"{product}.app"
         if app_dir.exists():
             shutil.rmtree(app_dir)
         package.link(xcode, name, objects, app_dir / product)
         project.bundle_id = package.assemble(xcode, pods, name, app_dir)
+        if getattr(app_build, "const_values", None) and appintents.generate(app_build.const_values, app_dir):
+            log("App Intents metadata (Metadata.appintents)")
         extensions.build_all(project.dir, app_dir, project.build_dir, debug, xcode=xcode)
         toolchain.thin_frameworks(app_dir)
+    except appintents.Unsupported as e:
+        sys.exit(f"error: App Intents: {e}")
     except (xbuild.BuildError, RuntimeError) as e:
         sys.exit(f"error: {e}")
     project.app = app_dir

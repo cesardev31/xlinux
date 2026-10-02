@@ -10,7 +10,8 @@ Hermes bytecode; the whole CocoaPods project, React Native, Reanimated, Expo
 modules and Google Sign-In compiled on Linux), and **native Xcode projects**
 (SwiftUI / UIKit apps with an `.xcodeproj`, including Xcode 16+ synchronized
 folders, generated Info.plist, `#Preview`/`@Observable` macros, asset symbols
-like `Color.brand` and String Catalogs; optional CocoaPods).
+like `Color.brand`, String Catalogs and App Intents / App Shortcuts for Siri
+and the Shortcuts app; optional CocoaPods).
 The core is framework-agnostic.
 
 It does not reimplement Xcode. It glues together open-source pieces that

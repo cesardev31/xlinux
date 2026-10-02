@@ -250,6 +250,19 @@ class TargetBuild:
             flags.append("-enable-bare-slash-regex")
         return flags
 
+    def const_values_flags(self, files):
+        """Constant values of App Intents types, from which Metadata.appintents
+        is generated (see appintents.py). Sets self.const_values."""
+        self.const_values = None
+        if not any("import AppIntents" in Path(f).read_text(errors="ignore") for f in files):
+            return []
+        from . import appintents
+        protocols = self.temp / "const_extract_protocols.json"
+        appintents.write_protocols(protocols)
+        self.const_values = self.objs / f"{self.module}.swiftconstvalues"
+        return ["-emit-const-values-path", self.const_values,
+                "-Xfrontend", "-const-gather-protocols-file", "-Xfrontend", protocols]
+
     def compile_swift(self, files):
         s = self.s
         module_dir = (self.fw / "Modules" if self.is_framework else self.out) / f"{self.module}.swiftmodule"
@@ -257,7 +270,7 @@ class TargetBuild:
         header = (self.fw / "Headers" if self.is_framework else self.derived) / f"{self.module}-Swift.h"
         header.parent.mkdir(parents=True, exist_ok=True)
         obj = self.objs / f"{self.module}-swift.o"
-        run(["swiftc", "-target", self.triple, "-sdk", config.IPHONE_SDK, "-resource-dir", config.SWIFT_RESOURCES,
+        run(["swiftc", *self.const_values_flags(files), "-target", self.triple, "-sdk", config.IPHONE_SDK, "-resource-dir", config.SWIFT_RESOURCES,
              "-module-name", self.module, "-swift-version", (s.get("SWIFT_VERSION") or "5").split(".")[0],
              # main.swift holds top-level code; otherwise @main (SwiftUI's App) is the entry point.
              "" if any(Path(f).name == "main.swift" for f in files) else "-parse-as-library", "-wmo", "-num-threads", "0",
