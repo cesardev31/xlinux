@@ -146,8 +146,16 @@ def _compile(ext, appex, debug):
                       "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../../Frameworks",
                       *sources, *toolchain.builtins(), "-o", appex / ext.name],
                      deployment_target=ext.deployment_target())
-    appkit.copy_loose_resources(ext.dir, appex)
-    if (ext.dir / "Assets.xcassets").exists():
+    if ext.target:
+        resources = [Path(r) for r in ext.target.get("resources", [])]
+        for resource in resources:
+            if resource.is_file() and resource.suffix in appkit.RESOURCE_SUFFIXES:
+                shutil.copy(resource, appex / resource.name)
+        catalogs = [r for r in resources if r.suffix == ".xcassets"]
+    else:
+        appkit.copy_loose_resources(ext.dir, appex)
+        catalogs = [ext.dir / "Assets.xcassets"] if (ext.dir / "Assets.xcassets").exists() else []
+    if catalogs:
         log(f"warning: {ext.name}: Assets.xcassets isn't compiled for extensions yet")
 
 
