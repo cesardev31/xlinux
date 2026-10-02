@@ -21,7 +21,7 @@ and fills the gaps where they didn't fit. Credits are [at the end](#credits-and-
 flutter run -d iphone-linux        # debug + hot reload (or pick the iPhone in VS Code)
 xlinux run                         # Flutter: release build, install, launch, logs
                                    # Expo: debug build, install, launch, Metro
-                                   # Xcode (SwiftUI/UIKit): Debug build, install, launch, logs
+                                   # Xcode (SwiftUI/UIKit): Debug build, install, launch, app logs
 xlinux run --release               # Expo / Xcode: release build, install, launch, logs
 xlinux run --target MyApp --configuration Staging   # Xcode: pick target / configuration
 xlinux build [--debug] [--install] [--project DIR]

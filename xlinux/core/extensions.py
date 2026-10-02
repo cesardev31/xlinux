@@ -103,6 +103,9 @@ def _info_plist(ext, app_info):
         "DTSDKName": "iphoneos",
     })
     info.setdefault("CFBundleInfoDictionaryVersion", "6.0")
+    # iOS refuses to install an .appex without a non-empty CFBundleName.
+    if not info.get("CFBundleName"):
+        info["CFBundleName"] = ext.name
     return info
 
 
