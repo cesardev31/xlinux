@@ -33,6 +33,10 @@ from ..util import log
 TOOLS = config.SUPPORT / "core/cocoapods/bin"  # ditto & co. for CocoaPods' script phases
 LANGUAGES = {".m": "objective-c", ".mm": "objective-c++", ".c": "c",
              ".cpp": "c++", ".cc": "c++", ".cxx": "c++"}
+# What SWIFT_APPROACHABLE_CONCURRENCY turns on (Xcode 26).
+APPROACHABLE_CONCURRENCY = ("DisableOutwardActorInference", "GlobalActorIsolatedTypesUsability",
+                            "InferIsolatedConformances", "InferSendableFromCaptures",
+                            "NonisolatedNonsendingByDefault")
 BUILDER = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
@@ -205,6 +209,7 @@ class TargetBuild:
         flags += ["-F", self.out]
         for cond in s.list("SWIFT_ACTIVE_COMPILATION_CONDITIONS"):
             flags += ["-D", cond]
+        flags += self.concurrency_flags()
         bridging = s.get("SWIFT_OBJC_BRIDGING_HEADER")
         if bridging:
             flags += ["-import-objc-header", self.path(bridging)]
@@ -225,6 +230,26 @@ class TargetBuild:
             flags += ["-Xcc", str(f)]
         return flags
 
+    def concurrency_flags(self):
+        """Swift language settings of Xcode 16+ templates (MainActor by default,
+        approachable concurrency, upcoming features)."""
+        s, flags = self.s, []
+        if s.get("SWIFT_DEFAULT_ACTOR_ISOLATION") == "MainActor":
+            flags += ["-default-isolation", "MainActor"]
+        strict = s.get("SWIFT_STRICT_CONCURRENCY")
+        if strict and strict != "minimal":
+            flags.append(f"-strict-concurrency={strict}")
+        features = set(APPROACHABLE_CONCURRENCY) if s.yes("SWIFT_APPROACHABLE_CONCURRENCY") else set()
+        for key in set().union(*s.layers):
+            if key.startswith("SWIFT_UPCOMING_FEATURE_"):
+                name = "".join(w.capitalize() for w in key[len("SWIFT_UPCOMING_FEATURE_"):].split("_"))
+                (features.add if s.yes(key) else features.discard)(name)
+        for feature in sorted(features):
+            flags += ["-enable-upcoming-feature", feature]
+        if s.yes("SWIFT_ENABLE_BARE_SLASH_REGEX"):
+            flags.append("-enable-bare-slash-regex")
+        return flags
+
     def compile_swift(self, files):
         s = self.s
         module_dir = (self.fw / "Modules" if self.is_framework else self.out) / f"{self.module}.swiftmodule"
@@ -234,7 +259,8 @@ class TargetBuild:
         obj = self.objs / f"{self.module}-swift.o"
         run(["swiftc", "-target", self.triple, "-sdk", config.IPHONE_SDK, "-resource-dir", config.SWIFT_RESOURCES,
              "-module-name", self.module, "-swift-version", (s.get("SWIFT_VERSION") or "5").split(".")[0],
-             "-parse-as-library", "-wmo", "-num-threads", "0",
+             # main.swift holds top-level code; otherwise @main (SwiftUI's App) is the entry point.
+             "" if any(Path(f).name == "main.swift" for f in files) else "-parse-as-library", "-wmo", "-num-threads", "0",
              "-Onone" if s.get("SWIFT_OPTIMIZATION_LEVEL", "-Onone") == "-Onone" else "-O",
              "-enable-testing" if s.yes("ENABLE_TESTABILITY") else "",
              "-Xfrontend", "-enable-cross-import-overlays",

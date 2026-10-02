@@ -106,16 +106,20 @@ def launch_screen(storyboard):
     return {"UIImageName": image} if image else {}
 
 
-def info_plist(source, variables, scene_delegate=None):
+def info_plist(source, variables, scene_delegate=None, base=None):
     """Info.plist ready for a .app built without ibtool.
 
+    source: the target's Info.plist (None if it has none); its keys override
+    `base`, an Info.plist generated from build settings.
     scene_delegate: class (Module.Class) that creates the window in code,
     replacing the main storyboard."""
-    with open(source, "rb") as f:
-        info = expand(plistlib.load(f), variables)
+    info = dict(base or {})
+    if source:
+        with open(source, "rb") as f:
+            info.update(expand(plistlib.load(f), variables))
     info.pop("UIMainStoryboardFile", None)
     storyboard = info.pop("UILaunchStoryboardName", None)
-    if storyboard and "UILaunchScreen" not in info:
+    if storyboard and "UILaunchScreen" not in info and source:
         folder = Path(source).parent
         candidates = [folder / f"{storyboard}.storyboard", folder / f"Base.lproj/{storyboard}.storyboard"]
         found = next((c for c in candidates if c.exists()), None)

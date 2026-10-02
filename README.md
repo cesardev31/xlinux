@@ -7,7 +7,10 @@ a device in VS Code / `flutter run`, real native plugins: Firebase, Stripe,
 Google Sign-In, WebView…) and **Expo / React Native** (debug builds with
 `expo-dev-client` and Metro, and release builds with the JavaScript bundled as
 Hermes bytecode; the whole CocoaPods project, React Native, Reanimated, Expo
-modules and Google Sign-In compiled on Linux).
+modules and Google Sign-In compiled on Linux), and **native Xcode projects**
+(SwiftUI / UIKit apps with an `.xcodeproj`, including Xcode 16+ synchronized
+folders, generated Info.plist, `#Preview`/`@Observable` macros, asset symbols
+like `Color.brand` and String Catalogs; optional CocoaPods).
 The core is framework-agnostic.
 
 It does not reimplement Xcode. It glues together open-source pieces that
@@ -18,7 +21,9 @@ and fills the gaps where they didn't fit. Credits are [at the end](#credits-and-
 flutter run -d iphone-linux        # debug + hot reload (or pick the iPhone in VS Code)
 xlinux run                         # Flutter: release build, install, launch, logs
                                    # Expo: debug build, install, launch, Metro
-xlinux run --release               # Expo: release build (JS bundled), install, launch, logs
+                                   # Xcode (SwiftUI/UIKit): Debug build, install, launch, logs
+xlinux run --release               # Expo / Xcode: release build, install, launch, logs
+xlinux run --target MyApp --configuration Staging   # Xcode: pick target / configuration
 xlinux build [--debug] [--install] [--project DIR]
 xlinux run --flavor qa --dart-define-from-file config/qa.json
 xlinux doctor                      # diagnostics

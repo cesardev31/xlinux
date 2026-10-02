@@ -16,7 +16,6 @@ hermesc. Build products live in the data directory.
 import hashlib
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -82,20 +81,6 @@ def prebuild(project):
     stamp.touch()
 
 
-def pod_install(project):
-    podfile, lock, manifest = (project.ios / "Podfile", project.ios / "Podfile.lock",
-                               project.ios / "Pods/Manifest.lock")
-    up_to_date = (manifest.exists() and lock.exists() and manifest.read_bytes() == lock.read_bytes()
-                  and not _newer([podfile, project.dir / "package.json"], manifest))
-    if up_to_date:
-        return
-    env = deps.ensure_cocoapods()
-    log("pod install")
-    result = subprocess.run(["pod", "install"], cwd=project.ios, env=env, capture_output=True, text=True)
-    if result.returncode:
-        sys.exit(f"error: pod install failed:\n{(result.stdout + result.stderr)[-4000:]}")
-
-
 def configure_expo(project, app_target):
     """The app's "[Expo] Configure project" phase: regenerates ExpoModulesProvider.swift."""
     script = project.ios / f"Pods/Target Support Files/Pods-{app_target}/expo-configure-project.sh"
@@ -140,7 +125,7 @@ def build(project_dir, debug=True):
     project.lock = DirLock(project.build_dir, f"{project.dir.name} ({project.configuration.lower()})")
 
     prebuild(project)
-    pod_install(project)
+    xproject.pod_install(project.ios, [project.dir / "package.json"])
     pods_root = project.ios / "Pods"
     jsi.ensure(project.dir, pods_root)
     plugins = macros.ensure(project.dir)

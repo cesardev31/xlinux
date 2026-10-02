@@ -81,8 +81,10 @@ def doctor(adapters):
            later + " (e.g. Stripe, widgets with #Preview)", optional=True)
 
     for adapter in adapters:
-        print(f"\n{adapter.NAME}:")
-        for passed, label, hint in adapter.doctor_checks(which):
+        checks = adapter.doctor_checks(which)
+        if checks:
+            print(f"\n{adapter.NAME}:")
+        for passed, label, hint in checks:
             ok &= _check(passed, label, hint)
 
     print("\niPhone:")

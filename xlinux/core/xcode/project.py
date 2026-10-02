@@ -10,10 +10,11 @@ import json
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from .. import config
-from ..util import output
+from .. import config, deps
+from ..util import log, output
 from .settings import Settings, project_layer, read_xcconfig
 
 DUMP_SCRIPT = config.SUPPORT / "core/xcodeproj_dump.rb"
@@ -23,6 +24,26 @@ def dump(xcodeproj, configuration, ruby_env):
     """JSON description of `xcodeproj` for `configuration` (Debug/Release)."""
     text = output([ruby_env["XLINUX_RUBY"], "-EUTF-8", DUMP_SCRIPT, xcodeproj, configuration], env=ruby_env)
     return json.loads(text)
+
+
+def _newer(paths, than):
+    return not than.exists() or any(p.exists() and p.stat().st_mtime > than.stat().st_mtime for p in paths)
+
+
+def pod_install(directory, inputs=()):
+    """`pod install` in `directory` (holding the Podfile) unless Pods/ matches
+    Podfile.lock and is newer than the Podfile and `inputs`."""
+    podfile, lock, manifest = (directory / "Podfile", directory / "Podfile.lock",
+                               directory / "Pods/Manifest.lock")
+    up_to_date = (manifest.exists() and lock.exists() and manifest.read_bytes() == lock.read_bytes()
+                  and not _newer([podfile, *inputs], manifest))
+    if up_to_date:
+        return
+    env = deps.ensure_cocoapods()
+    log("pod install")
+    result = subprocess.run(["pod", "install"], cwd=directory, env=env, capture_output=True, text=True)
+    if result.returncode:
+        sys.exit(f"error: pod install failed:\n{(result.stdout + result.stderr)[-4000:]}")
 
 
 class XcodeProject:

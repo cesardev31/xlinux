@@ -5,13 +5,14 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .adapters import expo, flutter
+from .adapters import expo, flutter, xcode
 from .adapters.expo import build as expo_build
 from .adapters.flutter import build as flutter_build
 from .adapters.flutter import debug as flutter_debug
+from .adapters.xcode import build as xcode_build
 from .core import device, setup, util
 
-ADAPTERS = [flutter, expo]
+ADAPTERS = [flutter, expo, xcode]
 
 
 def detect_adapter(project_dir):
@@ -19,8 +20,10 @@ def detect_adapter(project_dir):
         return flutter
     if expo.detects(project_dir):
         return expo
+    if xcode.detects(project_dir):
+        return xcode
     sys.exit(f"error: unrecognized project type in {Path(project_dir).resolve()} "
-             "(supported: Flutter, Expo)")
+             "(supported: Flutter, Expo, Xcode projects with SwiftUI / UIKit)")
 
 
 def cmd_setup(args):
@@ -35,6 +38,12 @@ def _dart_defines(args):
     return flutter_build.read_dart_defines(args.dart_define, args.dart_define_from_file)
 
 
+def _add_xcode_options(p):
+    p.add_argument("--target", help="Xcode projects: app target to build (default: the first app target)")
+    p.add_argument("--configuration", help="Xcode projects: build configuration (default: Debug, or "
+                                           "Release with --release / without --debug)")
+
+
 def _add_dart_define_options(p):
     p.add_argument("--flavor", help="Flutter: Xcode configuration suffix (e.g. qa selects Release-qa)")
     p.add_argument("--dart-define", action="append", default=[], metavar="KEY=VALUE",
@@ -43,8 +52,18 @@ def _add_dart_define_options(p):
                    help="like flutter's --dart-define-from-file (.json or .env, repeatable)")
 
 
+def _xcode_build(args, debug):
+    return xcode_build.build(args.project, debug=debug, target=args.target, configuration=args.configuration)
+
+
 def cmd_build(args):
-    if detect_adapter(args.project) is expo:
+    adapter = detect_adapter(args.project)
+    if adapter is xcode:
+        project = _xcode_build(args, args.debug)
+        if args.install:
+            device.install(project.app, device.first_device()[0])
+        return
+    if adapter is expo:
         project = expo_build.build(args.project, debug=args.debug)
         if args.install:
             device.install(project.app, device.first_device()[0])
@@ -55,7 +74,14 @@ def cmd_build(args):
 
 
 def cmd_run(args):
-    if detect_adapter(args.project) is expo:
+    adapter = detect_adapter(args.project)
+    if adapter is xcode:
+        project = _xcode_build(args, not args.release)
+        device.install(project.app, device.first_device()[0])
+        project.lock.release()
+        xcode.run(project)
+        return
+    if adapter is expo:
         # Expo: debug with expo-dev-client and Metro, or a release with the
         # JavaScript bundled in the app.
         project = expo_build.build(args.project, debug=not args.release)
@@ -162,14 +188,16 @@ def main():
     p.add_argument("--debug", action="store_true", help="debug mode (JIT, for hot reload)")
     p.add_argument("--install", action="store_true", help="sign and install on the iPhone")
     _add_dart_define_options(p)
+    _add_xcode_options(p)
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("run", help="build, install and launch: Flutter in release mode (streams logs), "
-                                     "Expo in debug mode (starts Metro)")
+                                     "Expo in debug mode (starts Metro), Xcode projects in Debug (streams logs)")
     p.add_argument("--project", default=".")
     p.add_argument("--release", action="store_true",
-                   help="Expo: release build (JavaScript bundled) instead of debug + Metro")
+                   help="Expo / Xcode projects: release build instead of debug")
     _add_dart_define_options(p)
+    _add_xcode_options(p)
     p.set_defaults(func=cmd_run)
 
     sub.add_parser("mcp", help="MCP server so an AI agent can see and drive the iPhone").set_defaults(func=cmd_mcp)

@@ -1,0 +1,148 @@
+"""Swift symbols for an asset catalog's colors and images, like Xcode's
+GeneratedAssetSymbols.swift (`Color.brand`, `.foregroundStyle(.brand)`,
+`Image(.logo)`).
+
+The actool stand-in has no Assets.car, where colors would live, so colors
+are generated with their values (light and dark) instead of being looked up
+by name. Images are loose PNGs, which UIKit and SwiftUI find by name.
+"""
+
+import json
+import re
+from pathlib import Path
+
+# Members SwiftUI's Color / UIKit's UIColor already have: no symbol for these.
+SYSTEM_COLORS = {
+    "accentColor", "primary", "secondary", "clear", "black", "white", "gray", "red", "green", "blue",
+    "orange", "yellow", "pink", "purple", "teal", "mint", "indigo", "cyan", "brown", "label", "link",
+    "separator", "tint", "accent", "systemBackground", "systemFill", "placeholderText", "lightText",
+    "darkText", "magenta", "lightGray", "darkGray",
+}
+SYSTEM_IMAGES = {"init"}
+
+
+def identifier(name, suffix):
+    """Xcode's symbol name: lowerCamelCase, without a trailing Color/Image."""
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", name) if w]
+    if not words:
+        return None
+    ident = words[0][0].lower() + words[0][1:] + "".join(w[0].upper() + w[1:] for w in words[1:])
+    if ident.endswith(suffix) and ident != suffix.lower() and len(ident) > len(suffix):
+        ident = ident[:-len(suffix)]
+    if ident[0].isdigit():
+        ident = "_" + ident
+    return ident
+
+
+def component(value):
+    """A color component as written by Xcode: "0.5", "128" or "0x80"."""
+    value = str(value).strip()
+    if value.lower().startswith("0x"):
+        return int(value, 16) / 255
+    number = float(value)
+    return number / 255 if number > 1 else number  # 8-bit integers ("128") vs floats ("0.502")
+
+
+def ui_color(color):
+    """Swift UIColor expression for a colorset entry's "color", or None."""
+    if not color:
+        return None
+    reference = color.get("reference")
+    if reference:
+        name = reference[:-len("Color")] if reference.endswith("Color") else reference
+        return f"UIColor.{name}"
+    c = color.get("components") or {}
+    alpha = component(c.get("alpha", 1))
+    if "white" in c:
+        return f"UIColor(white: {component(c['white']):.4f}, alpha: {alpha:.4f})"
+    try:
+        r, g, b = (component(c[k]) for k in ("red", "green", "blue"))
+    except KeyError:
+        return None
+    init = "displayP3Red" if color.get("color-space") == "display-p3" else "red"
+    return f"UIColor({init}: {r:.4f}, green: {g:.4f}, blue: {b:.4f}, alpha: {alpha:.4f})"
+
+
+def colorset(path):
+    """Swift UIColor expression for a .colorset (dynamic if it has a dark variant)."""
+    contents = json.loads((path / "Contents.json").read_text())
+    light = dark = None
+    for entry in contents.get("colors", []):
+        if entry.get("idiom") not in (None, "universal", "iphone"):
+            continue
+        appearances = {a.get("value") for a in entry.get("appearances", []) if a.get("appearance") == "luminosity"}
+        expr = ui_color(entry.get("color"))
+        if "dark" in appearances:
+            dark = dark or expr
+        elif not appearances or "light" in appearances:
+            light = light or expr
+    light = light or dark
+    if not light:
+        return None
+    if not dark or dark == light:
+        return light
+    return f"UIColor {{ $0.userInterfaceStyle == .dark ? {dark} : {light} }}"
+
+
+def catalog_entries(catalog, colors, images):
+    for entry in sorted(Path(catalog).iterdir()):
+        if entry.suffix == ".colorset":
+            colors.setdefault(entry.stem, entry)
+        elif entry.suffix == ".imageset":
+            images.setdefault(entry.stem, entry)
+        elif entry.is_dir() and not entry.suffix:
+            contents = entry / "Contents.json"
+            namespaced = contents.exists() and json.loads(contents.read_text()).get(
+                "properties", {}).get("provides-namespace")
+            if not namespaced:  # namespaced folders: Xcode nests their symbols; not generated
+                catalog_entries(entry, colors, images)
+
+
+def generate(catalogs, output, extensions=True):
+    """Write the symbols of `catalogs` to `output`; return it, or None if
+    there's nothing to generate."""
+    colors, images = {}, {}
+    for catalog in catalogs:
+        catalog_entries(catalog, colors, images)
+    lines = []
+    color_values = {}
+    for name, path in colors.items():
+        ident = identifier(name, "Color")
+        try:
+            value = colorset(path)
+        except (OSError, ValueError, TypeError):
+            value = None
+        if ident and value and ident not in SYSTEM_COLORS:
+            color_values[ident] = value
+    image_names = {identifier(n, "Image"): n for n in images}
+    image_names = {k: v for k, v in image_names.items() if k and k not in SYSTEM_IMAGES}
+    if not color_values and not image_names:
+        return None
+
+    lines += ["// Generated by xlinux from the asset catalogs (like Xcode's GeneratedAssetSymbols.swift).",
+              "import Foundation", "import UIKit", "import SwiftUI", "#if canImport(DeveloperToolsSupport)",
+              "import DeveloperToolsSupport", "#endif", ""]
+    if color_values:
+        lines.append("extension UIColor {")
+        lines += [f"    static var {k}: UIColor {{ {v} }}" for k, v in color_values.items()]
+        lines.append("}")
+        if extensions:
+            lines.append("extension Color {")
+            lines += [f"    static var {k}: Color {{ Color(uiColor: .{k}) }}" for k in color_values]
+            lines += ["}", "extension ShapeStyle where Self == Color {"]
+            lines += [f"    static var {k}: Color {{ Color(uiColor: .{k}) }}" for k in color_values]
+            lines.append("}")
+    if image_names:
+        lines += ["@available(iOS 17.0, *)", "extension ImageResource {"]
+        lines += [f'    static let {k} = ImageResource(name: "{v}", bundle: .main)' for k, v in image_names.items()]
+        lines.append("}")
+        if extensions:
+            lines += ["extension UIImage {"]
+            lines += [f'    static var {k}: UIImage {{ UIImage(named: "{v}")! }}' for k, v in image_names.items()]
+            lines.append("}")
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(lines) + "\n"
+    if not output.exists() or output.read_text() != text:
+        output.write_text(text)
+    return output

@@ -5,8 +5,8 @@ Guidance for AI coding agents working **on** xlinux or **with** it.
 ## What xlinux is
 
 A CLI that builds, installs and debugs iOS apps on a real iPhone from Linux
-(no Mac). Supported: Flutter, and Expo / React Native (debug builds with
-expo-dev-client + Metro). It glues together xtool,
+(no Mac). Supported: Flutter, Expo / React Native (debug builds with
+expo-dev-client + Metro) and native Xcode projects (SwiftUI / UIKit). It glues together xtool,
 Darling, pymobiledevice3, Swift/LLVM and Flutter's own tooling; see README.md.
 
 ## Using xlinux in an app project

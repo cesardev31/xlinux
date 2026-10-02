@@ -47,10 +47,11 @@ def dylib(source, output, install_name, extra=()):
                   "-install_name", install_name, *extra, source, "-o", output])
 
 
-def swiftc(args, **kw):
+def swiftc(args, deployment_target=None, **kw):
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
-    return run(["swiftc", "-target", target(), "-sdk", config.IPHONE_SDK,
+    triple = f"arm64-apple-ios{deployment_target}" if deployment_target else target()
+    return run(["swiftc", "-target", triple, "-sdk", config.IPHONE_SDK,
                 "-resource-dir", config.SWIFT_RESOURCES, *SWIFT_LINKER_FLAGS,
                 "-Xfrontend", "-enable-cross-import-overlays", *args], **kw)
 

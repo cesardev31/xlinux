@@ -19,8 +19,9 @@ from .util import log
 
 
 class Extension:
-    def __init__(self, name, directory, info_plist, bundle_id, entitlements=None, settings=None):
+    def __init__(self, name, directory, info_plist, bundle_id, entitlements=None, settings=None, target=None):
         self.settings = settings
+        self.target = target  # the Xcode target, when the project was read with xcode
         self.name = name
         self.entitlements = entitlements
         self.dir = directory
@@ -28,7 +29,20 @@ class Extension:
         self.bundle_id = bundle_id
 
     def sources(self):
+        """The target's Compile Sources (Xcode projects), else every Swift
+        file next to its Info.plist (Flutter's convention)."""
+        if self.target:
+            return [Path(src["path"]) for src in self.target.get("sources", [])]
         return sorted(p for p in self.dir.rglob("*.swift"))
+
+    def inputs(self):
+        """Every file the build depends on (for the fingerprint)."""
+        if self.target:
+            return sorted({*self.sources(), self.info_plist})
+        return sorted(p for p in self.dir.rglob("*") if p.is_file())
+
+    def deployment_target(self):
+        return (self.settings.get("IPHONEOS_DEPLOYMENT_TARGET") if self.settings else "") or config.MIN_IOS
 
 
 def discover(ios_dir, app_bundle_id, xcode=None):
@@ -42,8 +56,9 @@ def discover(ios_dir, app_bundle_id, xcode=None):
                 raise SystemExit(f"error: {target['name']} has no {xcode.configuration} configuration")
         settings_list = [xcode.settings(t) for t in targets]
     else:
-        settings_list = appkit.build_settings(ios_dir)
-    for settings in settings_list:
+        targets = []
+        settings_list = list(appkit.build_settings(ios_dir))
+    for settings, target in zip(settings_list, targets or [None] * len(settings_list)):
         plist_path = settings.get("INFOPLIST_FILE", "")
         if not plist_path or plist_path in found:
             continue
@@ -53,12 +68,15 @@ def discover(ios_dir, app_bundle_id, xcode=None):
         with open(plist, "rb") as f:
             if "NSExtension" not in plistlib.load(f):
                 continue
-        name = settings.get("PRODUCT_NAME", "").replace("$(TARGET_NAME)", "") or plist.parent.name
+        name = settings.get("PRODUCT_NAME", "")
+        name = (settings.expand(name) if target else name.replace("$(TARGET_NAME)", "")) or \
+            (target["name"] if target else plist.parent.name)
         bundle_id = settings.get("PRODUCT_BUNDLE_IDENTIFIER") or f"{app_bundle_id}.{name}"
         entitlements = settings.get("CODE_SIGN_ENTITLEMENTS")
         entitlements = ios_dir / entitlements if entitlements else None
         found[plist_path] = Extension(name, plist.parent, plist, bundle_id,
-                                      entitlements if entitlements and entitlements.exists() else None, settings)
+                                      entitlements if entitlements and entitlements.exists() else None, settings,
+                                      target)
     return list(found.values())
 
 
@@ -78,7 +96,7 @@ def _info_plist(ext, app_info):
         "CFBundlePackageType": "XPC!",
         "CFBundleShortVersionString": variables["MARKETING_VERSION"],
         "CFBundleVersion": variables["CURRENT_PROJECT_VERSION"],
-        "MinimumOSVersion": config.MIN_IOS,
+        "MinimumOSVersion": ext.deployment_target(),
         "CFBundleSupportedPlatforms": ["iPhoneOS"],
         "UIDeviceFamily": [1, 2],
         "DTPlatformName": "iphoneos",
@@ -96,8 +114,8 @@ def _fingerprint(ext, info, debug):
     h.update(repr((sorted(info.items(), key=str), debug, config.MIN_IOS, str(config.IPHONE_SDK))).encode())
     if ext.entitlements:
         h.update(ext.entitlements.read_bytes())
-    for path in sorted(p for p in ext.dir.rglob("*") if p.is_file()):
-        h.update(str(path.relative_to(ext.dir)).encode())
+    for path in ext.inputs():
+        h.update(str(path).encode())
         h.update(path.read_bytes())
     return h.hexdigest()
 
@@ -106,15 +124,16 @@ def _compile(ext, appex, debug):
     appex.mkdir(parents=True)
     sources = ext.sources()
     if not sources:
-        raise SystemExit(f"error: extension {ext.name} has no Swift sources in {ext.dir}")
-    if not deps.macro_server_current() and deps.needs_patched_macros([ext.dir]):
+        raise SystemExit(f"error: extension {ext.name} has no Swift sources")
+    if not deps.macro_server_current() and deps.needs_patched_macros({p.parent for p in sources}):
         deps.ensure_macro_server()  # e.g. a widget's #Preview(as: .systemSmall)
-    if any(p.suffix in (".m", ".mm", ".c") for p in ext.dir.rglob("*")):
+    if any(p.suffix in (".m", ".mm", ".c") for p in (sources if ext.target else ext.dir.rglob("*"))):
         log(f"warning: {ext.name}: only Swift sources are compiled for extensions")
     module = re.sub(r"\W", "_", ext.name)
     # With an @main type (WidgetBundle, Widget…) and no main.swift, swiftc
     # needs -parse-as-library, as Xcode passes.
     library = [] if any(p.name == "main.swift" for p in sources) else ["-parse-as-library"]
+    sources = [p for p in sources if p.suffix == ".swift"]
     toolchain.swiftc(["-Onone" if debug else "-O", "-module-name", module, *library,
                       "-application-extension", "-Xlinker", "-application_extension",
                       # Like Xcode (and xtool): Foundation's NSExtensionMain sets up the
@@ -122,7 +141,8 @@ def _compile(ext, appex, debug):
                       # through Swift's main traps in ExtensionFoundation.
                       "-framework", "Foundation", "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                       "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../../Frameworks",
-                      *sources, *toolchain.builtins(), "-o", appex / ext.name])
+                      *sources, *toolchain.builtins(), "-o", appex / ext.name],
+                     deployment_target=ext.deployment_target())
     appkit.copy_loose_resources(ext.dir, appex)
     if (ext.dir / "Assets.xcassets").exists():
         log(f"warning: {ext.name}: Assets.xcassets isn't compiled for extensions yet")
