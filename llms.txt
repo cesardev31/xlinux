@@ -1,6 +1,6 @@
 # xlinux
 
-> Build, install and debug iOS apps on a real iPhone from Linux, without a Mac. Flutter is supported today (release, debug with hot reload, native plugins via SwiftPM and CocoaPods-to-SwiftPM conversion); the core is framework-agnostic. Includes an MCP server so AI agents can see and drive the iPhone.
+> Build, install and debug iOS apps on a real iPhone from Linux, without a Mac. Supports Flutter (release, debug with hot reload, native plugins), Expo / React Native (debug with Metro, release with Hermes) and native Xcode projects (SwiftUI / UIKit, including App Intents for Siri and Shortcuts); the core is framework-agnostic. Includes an MCP server so AI agents can see and drive the iPhone.
 
 ## Docs
 

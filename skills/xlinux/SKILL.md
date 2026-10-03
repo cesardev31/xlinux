@@ -1,6 +1,6 @@
 ---
 name: xlinux
-description: Build, install, debug and drive iOS apps on a real iPhone from Linux with xlinux (Flutter). Use when the user wants to run a Flutter app on an iPhone from Linux, take screenshots of the iPhone, tap/type on it, hot reload, or read device logs.
+description: Build, install, debug and drive iOS apps on a real iPhone from Linux with xlinux (Flutter, Expo / React Native, native SwiftUI / UIKit Xcode projects). Use when the user wants to run a Flutter app on an iPhone from Linux, take screenshots of the iPhone, tap/type on it, hot reload, or read device logs.
 ---
 
 # xlinux
@@ -22,6 +22,11 @@ plugging in/unlocking the iPhone, or enabling Developer Mode).
 - Expo / React Native: `xlinux run` from the project (debug build, installs,
   launches and starts Metro; the dev launcher connects to the printed URL).
   The first build takes ~20-30 min; later builds only rebuild what changed.
+- Native Xcode project (SwiftUI / UIKit, a folder with an `.xcodeproj`):
+  `xlinux run` (Debug build, installs, launches, prints the app's own logs;
+  `--release`, `--target`, `--configuration`). No hot reload: every change is
+  a rebuild + reinstall. App Intents / App Shortcuts work (Siri, Shortcuts);
+  phrases in other languages go in `AppShortcuts.xcstrings`.
 
 The first build of an app with native plugins can take several minutes
 (SwiftPM fetches dependencies); later builds are cached.
