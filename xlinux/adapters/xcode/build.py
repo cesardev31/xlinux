@@ -135,7 +135,8 @@ def build(project_dir, debug=True, target=None, configuration=None):
         project.bundle_id = package.assemble(xcode, pods, name, app_dir)
         if getattr(app_build, "const_values", None) and appintents.generate(app_build.const_values, app_dir):
             log("App Intents metadata (Metadata.appintents)")
-        extensions.build_all(project.dir, app_dir, project.build_dir, debug, xcode=xcode)
+        extensions.build_all(project.dir, app_dir, project.build_dir, debug, xcode=xcode,
+                             embedded=target.get("embedded_extensions", []))
         toolchain.thin_frameworks(app_dir)
     except appintents.Unsupported as e:
         sys.exit(f"error: App Intents: {e}")

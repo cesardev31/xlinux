@@ -45,12 +45,14 @@ class Extension:
         return (self.settings.get("IPHONEOS_DEPLOYMENT_TARGET") if self.settings else "") or config.MIN_IOS
 
 
-def discover(ios_dir, app_bundle_id, xcode=None):
-    """Extension targets of the Xcode project in `ios_dir`."""
+def discover(ios_dir, app_bundle_id, xcode=None, embedded=None):
+    """Extension targets of the Xcode project in `ios_dir` (only those named in
+    `embedded`, the app's Embed Foundation Extensions phase, when given)."""
     found = {}
     if xcode:
         targets = [t for t in xcode.targets.values()
-                   if t.get("product_type") == "com.apple.product-type.app-extension"]
+                   if t.get("product_type") == "com.apple.product-type.app-extension"
+                   and (embedded is None or t["name"] in embedded)]
         for target in targets:
             if not target.get("configuration_available", True):
                 raise SystemExit(f"error: {target['name']} has no {xcode.configuration} configuration")
@@ -159,11 +161,19 @@ def _compile(ext, appex, debug):
         log(f"warning: {ext.name}: Assets.xcassets isn't compiled for extensions yet")
 
 
-def build_all(ios_dir, app, build_dir, debug, xcode=None):
-    """Compile every extension into `app`/PlugIns. Returns the extension names."""
+def build_all(ios_dir, app, build_dir, debug, xcode=None, embedded=None):
+    """Compile every extension the app embeds into `app`/PlugIns. Returns the
+    extension names. Extensions no longer built are removed from PlugIns and
+    the cache: xtool registers an App ID for every .appex it finds."""
     with open(app / "Info.plist", "rb") as f:
         app_info = plistlib.load(f)
-    extensions = discover(ios_dir, app_info["CFBundleIdentifier"], xcode)
+    extensions = discover(ios_dir, app_info["CFBundleIdentifier"], xcode, embedded)
+    names = {f"{ext.name}.appex" for ext in extensions}
+    for folder in (app / "PlugIns", build_dir / "extensions"):
+        for stale in folder.glob("*.appex") if folder.is_dir() else []:
+            if stale.name not in names:
+                shutil.rmtree(stale)
+                stale.with_suffix(".fingerprint").unlink(missing_ok=True)
     for ext in extensions:
         info = _info_plist(ext, app_info)
         cached = build_dir / "extensions" / f"{ext.name}.appex"

@@ -76,6 +76,13 @@ targets = project.targets.map do |t|
     settings: settings_of(config),
     xcconfig: xcconfig_of(config),
     dependencies: t.dependencies.map { |d| d.target ? d.target.name : d.name }.compact,
+    # Targets whose product a Copy Files phase puts in PlugIns (dstSubfolderSpec 13):
+    # the extensions this app embeds ("Embed Foundation Extensions").
+    embedded_extensions: t.build_phases.grep(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
+      .select { |ph| ph.dst_subfolder_spec.to_s == '13' }
+      .flat_map { |ph| ph.files.map { |f| f.file_ref } }
+      .map { |ref| project.targets.find { |x| x.respond_to?(:product_reference) && x.product_reference == ref } }
+      .compact.map(&:name),
     packages: t.respond_to?(:package_product_dependencies) ? t.package_product_dependencies.map(&:product_name) : [],
     scripts: t.build_phases.grep(Xcodeproj::Project::Object::PBXShellScriptBuildPhase).map do |s|
       { name: s.name, script: s.shell_script }
