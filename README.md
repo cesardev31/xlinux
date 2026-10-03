@@ -56,6 +56,8 @@ production Flutter apps.
 | CocoaPods-only plugins with Objective-C/C/C++: real CocoaPods (no Runner.xcodeproj changes) + the same pod builder as Expo, e.g. `device_info` | ✅ |
 | Expo / React Native, debug (expo-dev-client + Metro): `pod install`, 49 pods incl. React Native, Reanimated, Screens, Expo modules, Google Sign-In; tested with Expo 56 / RN 0.85 | ✅ |
 | Expo / React Native release: JavaScript bundled as Hermes bytecode, prebuilt frameworks switched to their release flavor, runs without Metro | ✅ |
+| Native Xcode projects (SwiftUI / UIKit): Xcode 16+ synchronized folders, generated Info.plist, `#Preview` / `@Observable`, asset symbols, String Catalogs, embedded widgets | ✅ |
+| App Intents / App Shortcuts without a Mac: listed and run in the Shortcuts app, run by Siri (Spanish phrases from `AppShortcuts.xcstrings`) | ✅ |
 
 ## How it works
 
@@ -92,11 +94,13 @@ xlinux/core/               framework-agnostic
   device.py                detect, install, launch, capture; DebugSession (DVT + debugserver + lldb)
   setup.py                 shared setup/doctor
   config.py                paths and environment (works without sourcing any env.sh)
-  xcode/                   Xcode projects without Xcode (CocoaPods-based apps):
+  xcode/                   Xcode projects without Xcode (native apps and CocoaPods-based ones):
     settings.py            xcconfig files and layered build settings
     project.py             targets and settings (reads the project with CocoaPods' xcodeproj gem)
     build.py               compiles targets (cached), prebuilt React Native rules
-    package.py             links the app and assembles the .app
+    package.py             links the app and assembles the .app (generated Info.plist, String Catalogs)
+    assets.py              asset catalog symbols (Color.brand, Image(.logo))
+    appintents.py          Metadata.appintents from swiftc's constant values (App Intents, Siri)
 xlinux/adapters/flutter/   everything Flutter-specific
   build.py                 flutter assemble, Runner, .app
   plugins.py               native plugins via SwiftPM (like `flutter build ios` on macOS)
@@ -107,6 +111,8 @@ xlinux/adapters/expo/      Expo / React Native
   build.py                 expo prebuild, pod install, pods + app, .app
   jsi.py                   ExpoModulesJSI (the one Expo module built from source)
   macros.py                Expo's Swift macro plugin for Linux
+xlinux/adapters/xcode/     native Xcode projects (SwiftUI / UIKit)
+  build.py                 app target, pods, asset symbols, App Intents, embedded extensions
 xlinux/mcp_server.py       MCP server (screenshots, touches, text, buttons, apps, hot reload, logs)
 support/core/              device_bridge.py, lldb_driver.py, darling_compat.c, xcodeproj_dump.rb,
                            app_logs.py (the app's log lines for `flutter run` / VS Code)
@@ -198,6 +204,59 @@ changes reload live. A release build runs the pods' script phases that switch
 the prebuilt frameworks (Expo modules, React Native, Hermes) to their release
 flavor and React Native's bundle phase (`expo export:embed` + `hermesc`); it
 works without the computer.
+
+## Native Xcode projects (SwiftUI / UIKit)
+
+From the folder holding the `.xcodeproj`:
+
+```
+xlinux run                       # Debug build, install, launch, the app's own logs
+xlinux run --release             # Release configuration
+xlinux run --target MyApp --configuration Staging
+xlinux build [--debug] [--install]
+```
+
+It does what `xcodebuild` does for the app target: the project is read as Xcode
+16+ writes it (synchronized folders, membership exceptions, an Info.plist
+generated from `INFOPLIST_KEY_*` settings, `MainActor` default isolation,
+approachable concurrency and upcoming features), the Swift sources are compiled
+in one module (`#Preview` and `@Observable` macros included) and the app is
+linked and assembled. Asset catalogs get Xcode's generated symbols
+(`Color.brand`, `.foregroundStyle(.brand)` with its dark variant,
+`Image(.logo)`), String Catalogs (`.xcstrings`) become `<lang>.lproj/*.strings`,
+a `Podfile` runs CocoaPods, and the extensions in the app's *Embed Foundation
+Extensions* phase (e.g. widgets) are built from their own targets into
+`PlugIns/`. `xlinux run` prints only what the app's code logs (`Logger`,
+`os_log`, `NSLog`), not the system frameworks' noise. There is no hot reload:
+every change is a rebuild and reinstall.
+
+### App Intents and Siri
+
+Intents and App Shortcuts declared in the app work without a Mac: they show up
+in the Shortcuts app and Siri runs their phrases (translate them
+in `AppShortcuts.xcstrings` for Siri in other languages):
+
+```swift
+struct FlipCoinIntent: AppIntent {
+    static let title: LocalizedStringResource = "Flip a Coin"
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        .result(dialog: IntentDialog(stringLiteral: Bool.random() ? "Heads" : "Tails"))
+    }
+}
+
+struct Shortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: FlipCoinIntent(), phrases: ["Flip a coin with \(.applicationName)"],
+                    shortTitle: "Flip a Coin", systemImageName: "circle.lefthalf.filled")
+    }
+}
+```
+
+Supported: title, description and `openAppWhenRun`; String, Bool, Int, Double,
+Date, URL and `AppEnum` parameters; dialog, returned value and open-intent
+results; shortcuts whose phrases contain `\(.applicationName)`. Anything else
+(entities, queries, phrases with parameters) stops the build with an error
+instead of producing metadata iOS might reject.
 
 ## Seeing and controlling the iPhone
 
@@ -339,6 +398,19 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   through Python, and `TAR_OPTIONS=--warning=no-unknown-keyword` (GNU tar's
   warnings about Apple's xattrs otherwise end up inside extracted files).
 
+- App Intents: Xcode's `appintentsmetadataprocessor` (and its
+  `AppIntentsMetadataExtractor` / `LinkMetadataDT` frameworks) only ships for
+  arm64 macOS, so Darling can't run it on an x86_64 PC. The Linux `swiftc`
+  emits the same `.swiftconstvalues` as Xcode's when given
+  `-emit-const-values-path` and `-const-gather-protocols-file`, and
+  `Metadata.appintents/extract.actionsdata` is JSON: its schema was
+  reconstructed from a paired Xcode build (source + output; xlinux's output is
+  equivalent) and ~150 samples published on GitHub. Parameter types are
+  `typeIdentifier` codes (0 String, 1 Bool, 2 Int, 7 Double, 8 Date, 11 URL),
+  each with a fixed list of resolvable input types; `outputFlags` is a bit set
+  (1 OpensIntent, 2 snippet, 4 ProvidesDialog, 8 widget configuration). Siri
+  in another language reads the phrases from `<lang>.lproj/AppShortcuts.strings`.
+
 ## Known limitations
 
 - `actool` without `Assets.car`: no catalog colors or data (`UIColor(named:)`,
@@ -357,6 +429,15 @@ For agents: [`AGENTS.md`](AGENTS.md) and a Claude Code skill in
   hardcoding it.
 - Extensions: Swift sources only; their `Assets.xcassets` isn't compiled yet.
 - `type_text` (MCP) only types ASCII.
+- Xcode projects: no Swift packages (SwiftPM dependencies) yet; storyboards
+  other than the launch screen, Core Data models, Metal shaders and `.icon`
+  icons are skipped; colors are reachable through the generated symbols
+  (`Color.brand`) but not by name (`Color("Brand")`) and there's no global
+  accent color (no `Assets.car`). Siri sometimes doesn't match a phrase that
+  usually works; Xcode also writes a compiled NLU corpus (`nlu/nlu.lzfse`) that
+  xlinux doesn't generate yet.
+- Free Apple ID: at most 10 new App IDs every 7 days (an app and each of its
+  extensions take one each).
 - Expo: the launch storyboard becomes an equivalent `UILaunchScreen` (the
   centered logo on the system background); expo-splash-screen's own overlay,
   which keeps the splash until `hideAsync()`, needs the compiled storyboard
