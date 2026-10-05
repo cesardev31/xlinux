@@ -185,6 +185,7 @@ def install(ipa, udid=None):
     ok, out = _xtool_install(ipa, udid)
     if ok:
         stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
+        _log_quota()
         return
     if out == "timeout":
         # Seen in practice: if an install is interrupted halfway, iOS gets stuck
@@ -199,8 +200,16 @@ def install(ipa, udid=None):
         ok, out = _xtool_install(ipa, udid)
         if ok:
             stamp.write_text(json.dumps({"hash": digest, "udid": udid, "time": time.time()}))
+            _log_quota()
             return
     sys.exit(f"error: xtool could not install the app:\n{out[-2000:]}")
+
+
+def _log_quota():
+    from . import account
+    line = account.summary_line()
+    if line:
+        log(line)
 
 
 def installed_app(bundle_id):

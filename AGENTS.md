@@ -15,6 +15,7 @@ Darling, pymobiledevice3, Swift/LLVM and Flutter's own tooling; see README.md.
 curl -fsSL https://github.com/cesardev31/xlinux/releases/latest/download/install.sh | sh
 xlinux setup                          # installs everything missing (Xcode .xip: manual download)
 xlinux doctor                         # check the environment and the iPhone
+xlinux account                        # free Apple ID: App IDs used in the last 7 days (limit 10)
 flutter run -d iphone-linux           # debug + hot reload (custom device)
 xlinux build [--debug] [--install] [--project DIR]
 xlinux run                            # release: build, install, launch, stream logs

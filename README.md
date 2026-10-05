@@ -28,6 +28,7 @@ xlinux run --target MyApp --configuration Staging   # Xcode: pick target / confi
 xlinux build [--debug] [--install] [--project DIR]
 xlinux run --flavor qa --dart-define-from-file config/qa.json
 xlinux doctor                      # diagnostics
+xlinux account                     # free Apple ID: App IDs used in the last 7 days
 xlinux setup                       # prepare the environment (once)
 xlinux mcp                         # MCP server for AI agents (see below)
 xlinux device screenshot iphone.png

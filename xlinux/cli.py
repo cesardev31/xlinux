@@ -10,7 +10,7 @@ from .adapters.expo import build as expo_build
 from .adapters.flutter import build as flutter_build
 from .adapters.flutter import debug as flutter_debug
 from .adapters.xcode import build as xcode_build
-from .core import device, setup, util
+from .core import account, device, setup, util
 
 ADAPTERS = [flutter, expo, xcode]
 
@@ -32,6 +32,10 @@ def cmd_setup(args):
 
 def cmd_doctor(_args):
     setup.doctor(ADAPTERS)
+
+
+def cmd_account(_args):
+    account.show()
 
 
 def _dart_defines(args):
@@ -182,6 +186,7 @@ def main():
     p.set_defaults(func=cmd_setup)
 
     sub.add_parser("doctor", help="check that everything is ready").set_defaults(func=cmd_doctor)
+    sub.add_parser("account", help="Apple ID quota: App IDs created in the last 7 days").set_defaults(func=cmd_account)
 
     p = sub.add_parser("build", help="build the app for iPhone")
     p.add_argument("--project", default=".", help="project directory (default: current directory)")
